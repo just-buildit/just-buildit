@@ -1,0 +1,104 @@
+"""
+_meta.py — parse pyproject.toml for just-build.
+
+Extracts:
+  - project.name
+  - project.version
+  - project.description        (optional → METADATA Summary)
+  - project.readme             (optional → METADATA Description + content-type)
+  - project.requires-python   (optional → METADATA Requires-Python)
+  - tool.just-build.command   (optional; omit for zero-config src/{name}/ default)
+  - tool.just-build.repair    (optional; auto-detected if omitted, False to skip)
+"""
+
+from __future__ import annotations
+
+import tomllib
+
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Literal
+
+_CONTENT_TYPES = {".md": "text/markdown", ".rst": "text/x-rst", ".txt": "text/plain"}
+
+
+@dataclass
+class BuildConfig:
+    name: str
+    version: str
+    command: str | None                  # None = zero-config src/{name}/ default
+    repair: str | Literal[False] | None  # None = auto-detect
+    exclude: list[str] = field(default_factory=list)
+    summary: str | None = None
+    readme_text: str | None = None
+    readme_content_type: str | None = None
+    requires_python: str | None = None
+
+
+_MISSING = object()
+
+
+def _read_readme(project_root: Path, raw: str | dict) -> tuple[str | None, str | None]:
+    """Return (text, content_type) from a project.readme value."""
+    if isinstance(raw, str):
+        path = project_root / raw
+        text = path.read_text(encoding="utf-8") if path.exists() else None
+        content_type = _CONTENT_TYPES.get(Path(raw).suffix.lower(), "text/plain")
+        return text, content_type
+    # table form: {file = "..."} or {text = "...", content-type = "..."}
+    content_type = raw.get("content-type", "text/plain")
+    if "file" in raw:
+        path = project_root / raw["file"]
+        text = path.read_text(encoding="utf-8") if path.exists() else None
+    else:
+        text = raw.get("text")
+    return text, content_type
+
+
+def load(project_root: Path) -> BuildConfig:
+    toml_path = project_root / "pyproject.toml"
+    if not toml_path.exists():
+        raise FileNotFoundError(f"No pyproject.toml found in {project_root}")
+
+    with toml_path.open("rb") as f:
+        data = tomllib.load(f)
+
+    project = data.get("project", {})
+
+    name = project.get("name")
+    if not name:
+        raise ValueError("[project] name is required in pyproject.toml")
+
+    version = project.get("version")
+    if not version:
+        raise ValueError("[project] version is required in pyproject.toml")
+
+    jb = data.get("tool", {}).get("just-build", {})
+
+    command = jb.get("command") or None  # None → zero-config src/{name}/ default
+    exclude = jb.get("exclude", [])
+
+    raw_repair = jb.get("repair", _MISSING)
+    if raw_repair is _MISSING:
+        repair = None  # auto-detect
+    elif raw_repair is False:
+        repair = False  # explicitly disabled
+    else:
+        repair = str(raw_repair)
+
+    readme_text, readme_content_type = None, None
+    raw_readme = project.get("readme")
+    if raw_readme:
+        readme_text, readme_content_type = _read_readme(project_root, raw_readme)
+
+    return BuildConfig(
+        name=name,
+        version=version,
+        command=command,
+        repair=repair,
+        exclude=exclude,
+        summary=project.get("description") or None,
+        readme_text=readme_text,
+        readme_content_type=readme_content_type,
+        requires_python=project.get("requires-python") or None,
+    )

@@ -1,0 +1,14 @@
+[build-system]
+requires = ["just-build"]
+build-backend = "just_build"
+
+[project]
+name = "hello"
+version = "0.1.0"
+description = "Minimal C extension fixture for just-build integration tests."
+readme = "README.md"
+requires-python = ">=3.11"
+
+[tool.just-build]
+command = "make"
+repair = false   # skip repair in tests; auditwheel not required in CI
