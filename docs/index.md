@@ -1,6 +1,6 @@
 # just-build
 
-Minimum viable [PEP 517](https://peps.python.org/pep-0517/) build backend for C extensions.
+The missing [PEP 517](https://peps.python.org/pep-0517/) build backend for C extensions.
 
 You know how to build your project. just-build knows how to package it.
 That's the whole deal.

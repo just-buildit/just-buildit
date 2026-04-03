@@ -5,7 +5,7 @@
 
 [project]
 site_name        = "just-build"
-site_description = "Minimum viable PEP 517 build backend for C extensions."
+site_description = "The missing PEP 517 build backend for C extensions."
 site_url         = "https://just-buildit.github.io/just-build/"
 repo_url         = "https://github.com/just-buildit/just-build"
 copyright        = "Copyright &copy; 2026 just-build contributors — MIT License"

@@ -9,7 +9,7 @@ repair = false
 [project]
 name = "just-buildit"
 version = "0.1.2"
-description = "Minimum viable PEP 517 build backend for C extensions."
+description = "The missing PEP 517 build backend for C extensions."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = []
