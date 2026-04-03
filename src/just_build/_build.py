@@ -160,7 +160,8 @@ def run_build(
             "JUST_BUILD_INCLUDE_DIR": include_dir,
             "JUST_BUILD_OUTPUT_DIR": str(output_dir),
             "JUST_BUILD_EXT_SUFFIX": ext_suffix,
-            "JUST_BUILD_LDFLAGS": " ".join(_ldflags() + _python_link_flags()),
+            "JUST_BUILD_LDFLAGS": " ".join(_ldflags()),
+            "JUST_BUILD_LIBS":    " ".join(_python_link_flags()),
         })
 
         print(f"just-build: running build command: {command}", flush=True)
@@ -170,6 +171,8 @@ def run_build(
         print(f"  JUST_BUILD_OUTPUT_DIR  = {output_dir}", flush=True)
         print(f"  JUST_BUILD_EXT_SUFFIX  = {ext_suffix}", flush=True)
         print(f"  JUST_BUILD_LDFLAGS     = {env['JUST_BUILD_LDFLAGS']}", flush=True)
+        if env["JUST_BUILD_LIBS"]:
+            print(f"  JUST_BUILD_LIBS        = {env['JUST_BUILD_LIBS']}", flush=True)
 
         result = subprocess.run(
             shlex.split(command),

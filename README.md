@@ -75,6 +75,7 @@ just-build sets these before calling your command:
 | `JUST_BUILD_OUTPUT_DIR` | `/tmp/just-build-xyz/output` |
 | `JUST_BUILD_EXT_SUFFIX` | `.cpython-312-x86_64-linux-gnu.so` |
 | `JUST_BUILD_LDFLAGS` | `-shared -fPIC` (Linux) / `-dynamiclib -undefined dynamic_lookup` (macOS) |
+| `JUST_BUILD_LIBS` | `` (Linux/macOS) / `-L/ucrt64/lib -lpython3.14` (Windows/MinGW) |
 
 `$JUST_BUILD_OUTPUT_DIR` is the wheel content root. Write everything your
 wheel needs there — extensions, Python sources, data files. just-build
@@ -95,7 +96,8 @@ $(TARGET):
 	$(CC) $(JUST_BUILD_LDFLAGS) \
 		-I$(JUST_BUILD_INCLUDE_DIR) \
 		src/mylib/mylib.c \
-		-o $(TARGET)
+		-o $(TARGET) \
+		$(JUST_BUILD_LIBS)
 ```
 
 ---
@@ -182,7 +184,8 @@ $(EXT):
 	$(CC) $(JUST_BUILD_LDFLAGS) \
 		-I$(JUST_BUILD_INCLUDE_DIR) \
 		src/mylib/_core.c \
-		-o $(EXT)
+		-o $(EXT) \
+		$(JUST_BUILD_LIBS)
 ```
 
 `import mylib` loads the Python package; `mylib._core` is the compiled

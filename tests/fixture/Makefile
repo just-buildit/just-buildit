@@ -21,7 +21,8 @@ $(TARGET):
 		$(JUST_BUILD_LDFLAGS) \
 		-I$(JUST_BUILD_INCLUDE_DIR) \
 		$(SRC) \
-		-o $(TARGET)
+		-o $(TARGET) \
+		$(JUST_BUILD_LIBS)
 
 clean:
 	rm -f $(TARGET)

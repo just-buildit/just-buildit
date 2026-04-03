@@ -8,4 +8,5 @@ $(EXT):
 	$(CC) $(JUST_BUILD_LDFLAGS) \
 		-I$(JUST_BUILD_INCLUDE_DIR) \
 		src/calc/_core.c \
-		-o $(EXT)
+		-o $(EXT) \
+		$(JUST_BUILD_LIBS)

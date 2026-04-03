@@ -7,6 +7,7 @@ Tests skip gracefully when required tools (cmake, meson) are not installed.
 from __future__ import annotations
 
 import os
+import platform
 import shutil
 import sys
 import tempfile
@@ -88,6 +89,10 @@ class TestCMakeExample(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
+        if platform.system() == "Windows":
+            raise unittest.SkipTest(
+                "cmake finds native Windows Python on MSYS2, not the MSYS2 Python"
+            )
         missing = [t for t in ("cmake", "make") if not shutil.which(t)]
         if missing:
             raise unittest.SkipTest(f"required tools not found: {', '.join(missing)}")

@@ -108,7 +108,7 @@ class TestBuildWheel(unittest.TestCase):
             self.assertTrue(any("RECORD" in n for n in names))
 
     def test_extension_is_importable_and_correct(self):
-        with tempfile.TemporaryDirectory(prefix="jb-test-") as tmp:
+        with tempfile.TemporaryDirectory(prefix="jb-test-", ignore_cleanup_errors=True) as tmp:
             wheel_dir = Path(tmp) / "dist"
             wheel_dir.mkdir()
             install_dir = Path(tmp) / "site"
@@ -152,7 +152,7 @@ class TestDefaultBuild(unittest.TestCase):
             self.assertTrue((wheel_dir / wheel_name).exists())
 
     def test_extension_is_importable_and_correct(self):
-        with tempfile.TemporaryDirectory(prefix="jb-test-") as tmp:
+        with tempfile.TemporaryDirectory(prefix="jb-test-", ignore_cleanup_errors=True) as tmp:
             wheel_dir = Path(tmp) / "dist"
             wheel_dir.mkdir()
             install_dir = Path(tmp) / "site"
@@ -202,14 +202,19 @@ class TestBuildEnv(unittest.TestCase):
             self.assertNotIn("-dynamiclib", flags)
 
     def test_python_link_flags_windows(self):
+        """On Windows, JUST_BUILD_LIBS carries -L and -lpython for the linker."""
         if platform.system() != "Windows":
             self.skipTest("Windows-only")
         flags = self._build._python_link_flags()
         self.assertTrue(flags)
         self.assertTrue(any(f.startswith("-L") for f in flags))
         self.assertTrue(any(f.startswith("-lpython") for f in flags))
+        # JUST_BUILD_LDFLAGS must NOT include -l flags (linker order)
+        ldflags = self._build._ldflags()
+        self.assertFalse(any(f.startswith("-l") for f in ldflags))
 
     def test_python_link_flags_non_windows(self):
+        """On Linux/macOS Python symbols resolve at runtime — JUST_BUILD_LIBS is empty."""
         if platform.system() == "Windows":
             self.skipTest("non-Windows only")
         self.assertEqual(self._build._python_link_flags(), [])
