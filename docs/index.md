@@ -1,3 +1,8 @@
+---
+hide:
+  - title
+---
+
 <p align="right">
   <img src="assets/logo-wordmark.svg" alt="just-build" width="360">
 </p>
