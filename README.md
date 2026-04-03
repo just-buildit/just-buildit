@@ -239,6 +239,18 @@ exclude = [             # optional — glob patterns relative to $JUST_BUILD_OUT
 
 ---
 
+## Platform support
+
+| Platform | Tested on |
+|---|---|
+| Linux | x86-64, aarch64 |
+| macOS | arm64, x86-64 |
+| Windows | MinGW-w64 / UCRT64 (MSYS2) |
+
+CI runs on all three platforms on every push.
+
+---
+
 ## Requirements
 
 - Python 3.11+
