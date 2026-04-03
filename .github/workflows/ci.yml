@@ -17,4 +17,4 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - run: uv run python -m unittest tests.test_build -v
+      - run: uv run --no-project python -m unittest tests.test_build tests.test_examples -v

@@ -1,0 +1,12 @@
+[build-system]
+requires = ["just-buildit"]
+build-backend = "just_build"
+
+[project]
+name = "add"
+version = "0.1.0"
+description = "just-build zero-config example — no Makefile, no command."
+requires-python = ">=3.11"
+
+# No [tool.just-build] section at all.
+# just-build finds src/add/add.c and builds it automatically.

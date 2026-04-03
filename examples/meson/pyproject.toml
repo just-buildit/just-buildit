@@ -1,0 +1,13 @@
+[build-system]
+requires = ["just-buildit"]
+build-backend = "just_build"
+
+[project]
+name = "add"
+version = "0.1.0"
+description = "just-build Meson example."
+requires-python = ">=3.11"
+
+[tool.just-build]
+command = "make pyext"
+repair = false

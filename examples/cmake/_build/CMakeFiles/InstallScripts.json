@@ -1,0 +1,7 @@
+{
+	"InstallScripts" : 
+	[
+		"/home/hunter-dsp/just-build/examples/cmake/_build/cmake_install.cmake"
+	],
+	"Parallel" : false
+}

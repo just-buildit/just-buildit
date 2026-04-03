@@ -1,0 +1,3 @@
+/home/hunter-dsp/just-build/examples/cmake/_build/CMakeFiles/add.dir
+/home/hunter-dsp/just-build/examples/cmake/_build/CMakeFiles/edit_cache.dir
+/home/hunter-dsp/just-build/examples/cmake/_build/CMakeFiles/rebuild_cache.dir

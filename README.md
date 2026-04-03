@@ -103,15 +103,17 @@ $(TARGET):
 
 ```toml
 [tool.just-build]
-command = "make _build/pyext"
+command = "make pyext"
 ```
 
 ```makefile
-_build/pyext: _build/CMakeCache.txt
-	cmake --build _build --target mylib
-
-_build/CMakeCache.txt:
+pyext:
 	cmake -B _build -DPython3_EXECUTABLE=$(JUST_BUILD_PYTHON)
+	cmake --build _build --target mylib
+	find _build -maxdepth 3 -name "$(JUST_BUILD_NAME)$(JUST_BUILD_EXT_SUFFIX)" \
+		-exec cp {} $(JUST_BUILD_OUTPUT_DIR)/ \;
+
+.PHONY: pyext
 ```
 
 ```cmake
@@ -121,10 +123,9 @@ project(mylib C)
 find_package(Python3 COMPONENTS Development.Module REQUIRED)
 Python3_add_library(mylib MODULE src/mylib.c)
 set_target_properties(mylib PROPERTIES
-    LIBRARY_OUTPUT_DIRECTORY "$ENV{JUST_BUILD_OUTPUT_DIR}"
-    OUTPUT_NAME              "$ENV{JUST_BUILD_NAME}"
-    SUFFIX                   "$ENV{JUST_BUILD_EXT_SUFFIX}"
-    PREFIX                   "")
+    OUTPUT_NAME "$ENV{JUST_BUILD_NAME}"
+    SUFFIX      "$ENV{JUST_BUILD_EXT_SUFFIX}"
+    PREFIX      "")
 ```
 
 ---
@@ -173,7 +174,7 @@ command = "make"
 EXT := $(JUST_BUILD_OUTPUT_DIR)/mylib/_core$(JUST_BUILD_EXT_SUFFIX)
 
 all: $(EXT)
-	cp -r src/mylib $(JUST_BUILD_OUTPUT_DIR)/mylib
+	cp src/mylib/*.py $(JUST_BUILD_OUTPUT_DIR)/mylib/
 
 $(EXT):
 	mkdir -p $(JUST_BUILD_OUTPUT_DIR)/mylib
@@ -237,12 +238,13 @@ exclude = [             # optional — glob patterns relative to $JUST_BUILD_OUT
 ## Running the tests
 
 ```sh
-python -m unittest tests.test_build -v
+python -m unittest tests.test_build tests.test_examples -v
 ```
 
-No dependencies required. The test suite builds a real C extension, verifies
-the wheel structure, imports the extension, and confirms it produces correct
-results.
+No dependencies required. `tests.test_build` builds real C extensions, verifies
+wheel structure, and confirms correct results. `tests.test_examples` builds each
+example in `examples/` end-to-end; CMake and Meson tests skip gracefully if
+those tools are not installed.
 
 ---
 

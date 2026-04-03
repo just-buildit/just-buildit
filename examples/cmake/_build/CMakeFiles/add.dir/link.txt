@@ -1,0 +1,1 @@
+/usr/bin/cc -fPIC -shared -Wl,--dependency-file=CMakeFiles/add.dir/link.d  -o add.cpython-312-x86_64-linux-gnu.so CMakeFiles/add.dir/src/add.c.o
