@@ -61,9 +61,9 @@ class TestNoDependencies(unittest.TestCase):
 
 
 class TestBuildEditable(unittest.TestCase):
-    """build_editable() must produce a valid wheel (delegates to build_wheel)."""
 
-    def test_build_editable_produces_same_result_as_build_wheel(self):
+    def test_no_editable_path_falls_back_to_build_wheel(self):
+        """Without editable_path, build_editable() produces a full compiled wheel."""
         with tempfile.TemporaryDirectory(prefix="jb-test-") as tmp:
             wheel_dir = Path(tmp) / "dist"
             wheel_dir.mkdir()
@@ -75,8 +75,41 @@ class TestBuildEditable(unittest.TestCase):
                 os.chdir(orig)
             wheel_path = wheel_dir / wheel_name
             self.assertTrue(wheel_path.exists())
-            self.assertEqual(wheel_path.suffix, ".whl")
             self.assertTrue(zipfile.is_zipfile(wheel_path))
+            with zipfile.ZipFile(wheel_path) as zf:
+                names = zf.namelist()
+            self.assertTrue(any(n.endswith((".so", ".pyd")) for n in names))
+
+    def test_editable_path_produces_pth_wheel(self):
+        """With editable_path set, build_editable() writes a .pth file — no build command."""
+        with tempfile.TemporaryDirectory(prefix="jb-test-") as tmp:
+            src_dir = Path(tmp) / "src"
+            src_dir.mkdir()
+            (Path(tmp) / "pyproject.toml").write_text(
+                '[project]\nname = "foo"\nversion = "0.1.0"\n'
+                '[tool.just-build]\neditable_path = "src"\nrepair = false\n'
+            )
+            wheel_dir = Path(tmp) / "dist"
+            wheel_dir.mkdir()
+            orig = os.getcwd()
+            os.chdir(tmp)
+            try:
+                wheel_name = just_build.build_editable(str(wheel_dir))
+            finally:
+                os.chdir(orig)
+            wheel_path = wheel_dir / wheel_name
+            self.assertTrue(wheel_path.exists())
+            self.assertTrue(zipfile.is_zipfile(wheel_path))
+            with zipfile.ZipFile(wheel_path) as zf:
+                names = zf.namelist()
+            pth_files = [n for n in names if n.endswith(".pth")]
+            self.assertEqual(len(pth_files), 1, f"Expected one .pth file, got: {names}")
+            # Wheel should be pure Python (py3-none-any) — no compiled extension
+            self.assertIn("py3-none-any", wheel_name)
+            # .pth content must point at the resolved src/ directory
+            with zipfile.ZipFile(wheel_path) as zf:
+                pth_content = zf.read(pth_files[0]).decode().strip()
+            self.assertEqual(pth_content, str(src_dir.resolve()))
 
 
 class TestBuildWheel(unittest.TestCase):

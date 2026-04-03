@@ -30,6 +30,7 @@ class BuildConfig:
     repair: str | Literal[False] | None  # None = auto-detect
     package: str | None = None           # package dir name; defaults to normalized project name
     exclude: list[str] = field(default_factory=list)
+    editable_path: str | None = None     # src root for .pth-file editable installs
     summary: str | None = None
     readme_text: str | None = None
     readme_content_type: str | None = None
@@ -76,8 +77,9 @@ def load(project_root: Path) -> BuildConfig:
 
     jb = data.get("tool", {}).get("just-build", {})
 
-    command = jb.get("command") or None  # None → zero-config src/{package}/ default
-    package = jb.get("package") or None  # override package dir name for src/ lookup
+    command = jb.get("command") or None        # None → zero-config src/{package}/ default
+    package = jb.get("package") or None        # override package dir name for src/ lookup
+    editable_path = jb.get("editable_path") or None  # src root for .pth editable installs
     exclude = jb.get("exclude", [])
 
     raw_repair = jb.get("repair", _MISSING)
@@ -100,6 +102,7 @@ def load(project_root: Path) -> BuildConfig:
         repair=repair,
         package=package,
         exclude=exclude,
+        editable_path=editable_path,
         summary=project.get("description") or None,
         readme_text=readme_text,
         readme_content_type=readme_content_type,

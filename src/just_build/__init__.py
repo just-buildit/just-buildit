@@ -46,8 +46,37 @@ def build_editable(
     config_settings=None,
     metadata_directory: str | None = None,
 ) -> str:
-    # C extension packages cannot be truly editable; build a regular wheel.
-    return build_wheel(wheel_directory, config_settings, metadata_directory)
+    project_root = Path.cwd()
+    wheel_dir = Path(wheel_directory)
+    config = _meta.load(project_root)
+
+    if config.editable_path is None:
+        # No editable_path configured — fall back to a full wheel build.
+        return build_wheel(wheel_directory, config_settings, metadata_directory)
+
+    # Fast path: write a .pth file pointing at the source tree.
+    # No build command is run; the C extension must already be compiled in place.
+    with tempfile.TemporaryDirectory(prefix="just-build-") as tmp:
+        output_dir = Path(tmp) / "output"
+        output_dir.mkdir()
+
+        pth_target = (project_root / config.editable_path).resolve()
+        pth_name = _normalize_name(config.name) + ".pth"
+        (output_dir / pth_name).write_text(str(pth_target) + "\n", encoding="utf-8")
+
+        wheel_path = _wheel.build_wheel(
+            name=config.name,
+            version=config.version,
+            output_dir=output_dir,
+            wheel_dir=wheel_dir,
+            exclude=[],
+            summary=config.summary,
+            readme_text=config.readme_text,
+            readme_content_type=config.readme_content_type,
+            requires_python=config.requires_python,
+        )
+
+    return wheel_path.name
 
 
 def build_wheel(

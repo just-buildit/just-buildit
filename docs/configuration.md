@@ -4,10 +4,11 @@
 
 ```toml
 [tool.just-build]
-command = "make"         # optional — omit for zero-config src/{package}/ build
-package = "my_package"  # optional — package directory name when it differs from project name
-repair  = "uvx ..."     # optional — auto-detected by platform, or false to skip
-exclude = [             # optional — glob patterns relative to $JUST_BUILD_OUTPUT_DIR
+command       = "make"        # optional — omit for zero-config src/{package}/ build
+package       = "my_package"  # optional — package dir name when it differs from project name
+editable_path = "src"         # optional — src root for fast .pth-file editable installs
+repair        = "uvx ..."     # optional — auto-detected by platform, or false to skip
+exclude = [                   # optional — glob patterns relative to $JUST_BUILD_OUTPUT_DIR
     "mypkg/tests/**",
     "mypkg/bench/**",
 ]
@@ -40,6 +41,16 @@ repair = "uvx auditwheel repair --plat manylinux_2_28_x86_64"  # custom
 
 ## Editable installs
 
-`pip install -e .` works. C extensions can't be truly editable — recompilation
-is always required — so just-build builds a regular wheel and installs that.
-The result is identical to `pip install .`.
+Set `editable_path` to the directory that should be added to `sys.path`:
+
+```toml
+[tool.just-build]
+command       = "make"
+editable_path = "src"
+```
+
+`pip install -e .` then installs a single `.pth` file pointing at `src/` —
+no build command is run. Python finds your source directly. The C extension
+must be compiled in place once (e.g. `make`) before importing.
+
+Without `editable_path`, `pip install -e .` falls back to a full wheel build.
