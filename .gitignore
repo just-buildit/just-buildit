@@ -12,3 +12,6 @@ wheels/
 # uv init artifacts
 main.py
 *.zip
+
+# Example build artifacts
+examples/**/_build/
