@@ -81,7 +81,9 @@ packages the entire directory verbatim, preserving structure.
 
 ---
 
-## Makefile example
+## Examples
+
+### Makefile
 
 ```makefile
 TARGET := $(JUST_BUILD_OUTPUT_DIR)/$(JUST_BUILD_NAME)$(JUST_BUILD_EXT_SUFFIX)
@@ -95,12 +97,94 @@ $(TARGET):
 		-o $(TARGET)
 ```
 
-For multi-extension or mixed Python/C projects, write the whole package tree:
+---
+
+### CMake
+
+```toml
+[tool.just-build]
+command = "make _build/pyext"
+```
 
 ```makefile
-just-build: pyext
-	cp -r python/mylib $(JUST_BUILD_OUTPUT_DIR)/mylib
+_build/pyext: _build/CMakeCache.txt
+	cmake --build _build --target mylib
+
+_build/CMakeCache.txt:
+	cmake -B _build -DPython3_EXECUTABLE=$(JUST_BUILD_PYTHON)
 ```
+
+```cmake
+# CMakeLists.txt
+cmake_minimum_required(VERSION 3.15)
+project(mylib C)
+find_package(Python3 COMPONENTS Development.Module REQUIRED)
+Python3_add_library(mylib MODULE src/mylib.c)
+set_target_properties(mylib PROPERTIES
+    LIBRARY_OUTPUT_DIRECTORY "$ENV{JUST_BUILD_OUTPUT_DIR}"
+    OUTPUT_NAME              "$ENV{JUST_BUILD_NAME}"
+    SUFFIX                   "$ENV{JUST_BUILD_EXT_SUFFIX}"
+    PREFIX                   "")
+```
+
+---
+
+### Meson
+
+```toml
+[tool.just-build]
+command = "make pyext"
+```
+
+```makefile
+pyext:
+	meson setup _build --reconfigure -Dbuildtype=release
+	meson compile -C _build
+	find _build -name "*$(JUST_BUILD_EXT_SUFFIX)" \
+		-exec cp {} $(JUST_BUILD_OUTPUT_DIR)/ \;
+```
+
+```python
+# meson.build
+project('mylib', 'c')
+py = import('python').find_installation()
+py.extension_module('mylib', 'src/mylib.c', install: false)
+```
+
+---
+
+### Mixed pure Python + C extension
+
+A package with a Python API wrapping a C core:
+
+```
+src/mylib/
+    __init__.py      # pure Python
+    utils.py         # pure Python
+    _core.c          # C extension
+```
+
+```toml
+[tool.just-build]
+command = "make"
+```
+
+```makefile
+EXT := $(JUST_BUILD_OUTPUT_DIR)/mylib/_core$(JUST_BUILD_EXT_SUFFIX)
+
+all: $(EXT)
+	cp -r src/mylib $(JUST_BUILD_OUTPUT_DIR)/mylib
+
+$(EXT):
+	mkdir -p $(JUST_BUILD_OUTPUT_DIR)/mylib
+	$(CC) -shared -fPIC \
+		-I$(JUST_BUILD_INCLUDE_DIR) \
+		src/mylib/_core.c \
+		-o $(EXT)
+```
+
+`import mylib` loads the Python package; `mylib._core` is the compiled
+extension — both land in the wheel from a single `$JUST_BUILD_OUTPUT_DIR`.
 
 ---
 
