@@ -185,11 +185,17 @@ class TestBuildEnv(unittest.TestCase):
 
     def test_ldflags_platform(self):
         flags = self._build._ldflags()
-        if platform.system() == "Darwin":
+        system = platform.system()
+        if system == "Darwin":
             self.assertIn("-dynamiclib", flags)
             self.assertIn("-undefined", flags)
             self.assertIn("dynamic_lookup", flags)
             self.assertNotIn("-shared", flags)
+            self.assertNotIn("-fPIC", flags)
+        elif system == "Windows":
+            self.assertIn("-shared", flags)
+            self.assertNotIn("-fPIC", flags)
+            self.assertNotIn("-dynamiclib", flags)
         else:
             self.assertIn("-shared", flags)
             self.assertIn("-fPIC", flags)

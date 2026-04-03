@@ -41,6 +41,8 @@ def _ldflags() -> list[str]:
     """Return platform-appropriate shared-library link flags."""
     if platform.system() == "Darwin":
         return ["-dynamiclib", "-undefined", "dynamic_lookup"]
+    if platform.system() == "Windows":
+        return ["-shared"]  # MinGW/UCRT64 — -fPIC is meaningless on Windows x64
     return ["-shared", "-fPIC"]
 
 

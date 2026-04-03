@@ -18,3 +18,19 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - run: uv run --no-project python -m unittest tests.test_build tests.test_examples -v
+
+  test-windows-ucrt64:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          install: >-
+            mingw-w64-ucrt-x86_64-python
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-cmake
+            make
+          update: true
+      - shell: msys2 {0}
+        run: python -m unittest tests.test_build tests.test_examples -v
