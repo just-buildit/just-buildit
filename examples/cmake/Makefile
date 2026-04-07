@@ -1,7 +1,8 @@
 pyext:
-	cmake -B _build -DPython3_EXECUTABLE=$(JUST_BUILD_PYTHON)
-	cmake --build _build --target add
-	find _build -maxdepth 3 -name "$(JUST_BUILD_NAME)$(JUST_BUILD_EXT_SUFFIX)" \
+	cmake -S . -B _build -DCMAKE_BUILD_TYPE=Release
+	cmake --build _build
+	find _build -name "*$(JUST_BUILD_EXT_SUFFIX)" \
 		-exec cp {} $(JUST_BUILD_OUTPUT_DIR)/ \;
 
-.PHONY: pyext
+clean:
+	rm -rf _build

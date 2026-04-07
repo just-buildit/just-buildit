@@ -10,3 +10,6 @@ $(EXT):
 		src/calc/_core.c \
 		-o $(EXT) \
 		$(JUST_BUILD_LIBS)
+
+clean:
+	rm -f src/calc/_core*.so src/calc/_core*.pyd

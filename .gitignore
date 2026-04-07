@@ -16,5 +16,8 @@ main.py
 # Example build artifacts
 examples/**/_build/
 
+# Test fixture build output
+tests/fixture/dist/
+
 # Zensical build output
 site/

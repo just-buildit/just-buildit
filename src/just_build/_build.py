@@ -51,15 +51,29 @@ def _python_link_flags() -> list[str]:
     On Windows/MinGW, return flags to explicitly link the Python import library.
     Linux/macOS resolve Python symbols at runtime (dynamic lookup / system linker);
     Windows requires them at link time.
+
+    Two cases:
+      MSYS2/MinGW Python  — ships libpython3.X.a in LIBDIR  → -lpython3.X
+      Native Windows CPython — ships python3X.lib in <root>/libs/ → -lpython3X
     """
     if platform.system() != "Windows":
         return []
     major = sys.version_info.major
     minor = sys.version_info.minor
-    libdir = sysconfig.get_config_var("LIBDIR") or str(
-        Path(sysconfig.get_path("stdlib")).parent
-    )
-    return [f"-L{libdir}", f"-lpython{major}.{minor}"]
+
+    # MSYS2 / MinGW-style Python: libpython3.X.a in LIBDIR
+    libdir = sysconfig.get_config_var("LIBDIR") or ""
+    if libdir and (Path(libdir) / f"libpython{major}.{minor}.a").exists():
+        return [f"-L{libdir}", f"-lpython{major}.{minor}"]
+
+    # Native Windows CPython: python3X.lib lives under <install root>/libs/
+    install_root = Path(sys.executable).parent
+    libs_dir = install_root / "libs"
+    if (libs_dir / f"python{major}{minor}.lib").exists():
+        return [f"-L{libs_dir}", f"-lpython{major}{minor}"]
+
+    # Fallback
+    return [f"-L{install_root}", f"-lpython{major}{minor}"]
 
 
 def _default_build(
