@@ -263,5 +263,6 @@ def run_repair(
         dest = wheel_dir / repaired.name
         repaired.replace(dest)
 
-    wheel_path.unlink(missing_ok=True)
+    if dest != wheel_path:
+        wheel_path.unlink(missing_ok=True)
     return dest
