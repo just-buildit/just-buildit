@@ -22,6 +22,7 @@ import shlex
 import subprocess
 import sys
 import sysconfig
+import tempfile
 from pathlib import Path
 
 
@@ -241,23 +242,26 @@ def run_repair(
             )
             return wheel_path
 
-    cmd = shlex.split(repair_command) + [str(wheel_path), "-w", str(wheel_dir)]
-    print(f"just-build: repairing wheel: {shlex.join(cmd)}", flush=True)
+    # Repair into a temp subdirectory so the tool never writes into the same
+    # directory as the input wheel — on Windows this causes a PermissionError
+    # when pip holds the source file open.
+    with tempfile.TemporaryDirectory(dir=wheel_dir, prefix="_repair_") as repair_tmp:
+        cmd = shlex.split(repair_command) + [str(wheel_path), "-w", repair_tmp]
+        print(f"just-build: repairing wheel: {shlex.join(cmd)}", flush=True)
 
-    result = subprocess.run(cmd)
-    if result.returncode != 0:
-        raise RuntimeError(
-            f"Wheel repair failed with exit code {result.returncode}:\n  {shlex.join(cmd)}"
-        )
+        result = subprocess.run(cmd)
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"Wheel repair failed with exit code {result.returncode}:\n  {shlex.join(cmd)}"
+            )
 
-    # auditwheel/delocate write a new wheel to wheel_dir; find the newest one
-    wheels = sorted(wheel_dir.glob("*.whl"), key=lambda p: p.stat().st_mtime)
-    if not wheels:
-        raise FileNotFoundError(f"Repair command ran but no wheel found in {wheel_dir}")
+        repaired_wheels = sorted(Path(repair_tmp).glob("*.whl"), key=lambda p: p.stat().st_mtime)
+        if not repaired_wheels:
+            raise FileNotFoundError(f"Repair command ran but no wheel found in {repair_tmp}")
 
-    repaired = wheels[-1]
-    if repaired != wheel_path:
-        # Remove the raw wheel; the repaired one supersedes it
-        wheel_path.unlink(missing_ok=True)
+        repaired = repaired_wheels[-1]
+        dest = wheel_dir / repaired.name
+        repaired.replace(dest)
 
-    return repaired
+    wheel_path.unlink(missing_ok=True)
+    return dest
