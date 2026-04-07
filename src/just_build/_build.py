@@ -53,26 +53,34 @@ def _python_link_flags() -> list[str]:
     Windows requires them at link time.
 
     Two cases:
-      MSYS2/MinGW Python  — ships libpython3.X.a in LIBDIR  → -lpython3.X
-      Native Windows CPython — ships python3X.lib in <root>/libs/ → -lpython3X
+      MSYS2/MinGW Python  — ships libpython3.X[.dll].a under <root>/lib/
+      Native Windows CPython — ships python3X.lib under <install root>/libs/
     """
     if platform.system() != "Windows":
         return []
     major = sys.version_info.major
     minor = sys.version_info.minor
 
-    # MSYS2 / MinGW-style Python: libpython3.X.a in LIBDIR
-    libdir = sysconfig.get_config_var("LIBDIR") or ""
-    if libdir and (Path(libdir) / f"libpython{major}.{minor}.a").exists():
-        return [f"-L{libdir}", f"-lpython{major}.{minor}"]
-
-    # Native Windows CPython: python3X.lib lives under <install root>/libs/
+    # Search candidate dirs: sysconfig LIBDIR, <exe_root>/lib, stdlib parent
     install_root = Path(sys.executable).parent
+    candidates = dict.fromkeys(filter(None, [
+        sysconfig.get_config_var("LIBDIR"),
+        str(install_root / "lib"),
+        str(Path(sysconfig.get_path("stdlib")).parent),
+    ]))
+
+    # MSYS2 / MinGW-style Python: libpython3.X.a or libpython3.X.dll.a
+    for d in candidates:
+        for stem in (f"libpython{major}.{minor}.a", f"libpython{major}.{minor}.dll.a"):
+            if (Path(d) / stem).exists():
+                return [f"-L{d}", f"-lpython{major}.{minor}"]
+
+    # Native Windows CPython: python3X.lib in <root>/libs/
     libs_dir = install_root / "libs"
     if (libs_dir / f"python{major}{minor}.lib").exists():
         return [f"-L{libs_dir}", f"-lpython{major}{minor}"]
 
-    # Fallback
+    # Last resort
     return [f"-L{install_root}", f"-lpython{major}{minor}"]
 
 
