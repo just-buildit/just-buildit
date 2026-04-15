@@ -231,34 +231,6 @@ def run_build(
     return output_dir
 
 
-def run_editable_command(
-    *,
-    name: str,
-    command: str,
-    output_dir: Path,
-    project_root: Path,
-) -> None:
-    """
-    Run the editable build command with JUST_BUILDIT_OUTPUT_DIR pointing at the
-    source tree (project_root / editable_path). Extensions are compiled in-place
-    so imports work immediately after the editable install.
-    """
-    env, ext_suffix = _make_env(name=name, output_dir=output_dir)
-
-    print(f"just-buildit: running editable command: {command}", flush=True)
-    _print_env(env, ext_suffix)
-
-    result = subprocess.run(
-        shlex.split(command),
-        cwd=str(project_root),
-        env=env,
-    )
-    if result.returncode != 0:
-        raise RuntimeError(
-            f"Editable build command failed with exit code {result.returncode}:\n  {command}"
-        )
-
-
 def run_repair(
     *,
     wheel_path: Path,
