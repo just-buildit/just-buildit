@@ -1,7 +1,7 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 120" width="480" height="120">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 540 120" width="540" height="120">
 
   <!-- Background -->
-  <rect width="480" height="120" rx="20" fill="#0d1117"/>
+  <rect width="540" height="120" rx="20" fill="#0d1117"/>
 
   <!-- Gear icon (scaled to 100x100, centered at 60,60) -->
   <g transform="translate(10,10) scale(0.5)">
@@ -38,7 +38,7 @@
     font-weight="bold"
     fill="#f59e0b"
     dominant-baseline="middle"
-  >just-build</text>
+  >just-buildit</text>
 
   <!-- Tagline -->
   <text
