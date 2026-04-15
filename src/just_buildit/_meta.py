@@ -4,11 +4,13 @@ _meta.py — parse pyproject.toml for just-buildit.
 Extracts:
   - project.name
   - project.version
-  - project.description        (optional → METADATA Summary)
-  - project.readme             (optional → METADATA Description + content-type)
-  - project.requires-python   (optional → METADATA Requires-Python)
-  - tool.just-buildit.command   (optional; omit for zero-config src/{name}/ default)
-  - tool.just-buildit.repair    (optional; auto-detected if omitted, False to skip)
+  - project.description           (optional → METADATA Summary)
+  - project.readme                (optional → METADATA Description + content-type)
+  - project.requires-python       (optional → METADATA Requires-Python)
+  - tool.just-buildit.command        (optional; omit for zero-config src/{name}/ default)
+  - tool.just-buildit.repair         (optional; auto-detected if omitted, False to skip)
+  - tool.just-buildit.editable_path  (optional; src root for .pth editable installs)
+  - tool.just-buildit.editable_command (optional; in-place compile command for editable installs)
 """
 
 from __future__ import annotations
@@ -31,6 +33,7 @@ class BuildConfig:
     package: str | None = None           # package dir name; defaults to normalized project name
     exclude: list[str] = field(default_factory=list)
     editable_path: str | None = None     # src root for .pth-file editable installs
+    editable_command: str | None = None  # in-place compile command run during build_editable()
     summary: str | None = None
     readme_text: str | None = None
     readme_content_type: str | None = None
@@ -79,7 +82,8 @@ def load(project_root: Path) -> BuildConfig:
 
     command = jb.get("command") or None        # None → zero-config src/{package}/ default
     package = jb.get("package") or None        # override package dir name for src/ lookup
-    editable_path = jb.get("editable_path") or None  # src root for .pth editable installs
+    editable_path    = jb.get("editable_path")    or None  # src root for .pth editable installs
+    editable_command = jb.get("editable_command") or None  # in-place compile for editable installs
     exclude = jb.get("exclude", [])
 
     raw_repair = jb.get("repair", _MISSING)
@@ -103,6 +107,7 @@ def load(project_root: Path) -> BuildConfig:
         package=package,
         exclude=exclude,
         editable_path=editable_path,
+        editable_command=editable_command,
         summary=project.get("description") or None,
         readme_text=readme_text,
         readme_content_type=readme_content_type,

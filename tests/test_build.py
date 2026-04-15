@@ -80,6 +80,91 @@ class TestBuildEditable(unittest.TestCase):
                 names = zf.namelist()
             self.assertTrue(any(n.endswith((".so", ".pyd")) for n in names))
 
+    def test_editable_command_runs_with_output_dir_set_to_source_root(self):
+        """editable_command is invoked with JUST_BUILDIT_OUTPUT_DIR = resolved editable_path."""
+        with tempfile.TemporaryDirectory(prefix="jb-test-") as tmp:
+            src_dir = Path(tmp) / "src"
+            src_dir.mkdir()
+            # Shell script writes $JUST_BUILDIT_OUTPUT_DIR into a marker file.
+            # Using a script avoids embedding paths in pyproject.toml.
+            script = Path(tmp) / "compile.sh"
+            script.write_text('echo "$JUST_BUILDIT_OUTPUT_DIR" > "$JUST_BUILDIT_OUTPUT_DIR/compiled.marker"\n')
+            (Path(tmp) / "pyproject.toml").write_text(
+                '[project]\nname = "foo"\nversion = "0.1.0"\n'
+                '[tool.just-buildit]\n'
+                'editable_path = "src"\n'
+                'editable_command = "sh ./compile.sh"\n'
+                'repair = false\n'
+            )
+            wheel_dir = Path(tmp) / "dist"
+            wheel_dir.mkdir()
+            orig = os.getcwd()
+            os.chdir(tmp)
+            try:
+                wheel_name = just_buildit.build_editable(str(wheel_dir))
+            finally:
+                os.chdir(orig)
+
+            # editable_command wrote the marker into src/ — proves OUTPUT_DIR = src/
+            marker = src_dir / "compiled.marker"
+            self.assertTrue(marker.exists(), "editable_command should write to JUST_BUILDIT_OUTPUT_DIR (src/)")
+            self.assertEqual(marker.read_text().strip(), str(src_dir.resolve()))
+
+            # Wheel is still py3-none-any with a single .pth
+            self.assertIn("py3-none-any", wheel_name)
+            with zipfile.ZipFile(wheel_dir / wheel_name) as zf:
+                pth_files = [n for n in zf.namelist() if n.endswith(".pth")]
+            self.assertEqual(len(pth_files), 1)
+
+    def test_editable_command_compiles_extension_in_place_and_is_importable(self):
+        """editable_command compiles .so into editable_path; extension importable via .pth."""
+        import shutil
+        import sysconfig as sc
+        with tempfile.TemporaryDirectory(prefix="jb-test-", ignore_cleanup_errors=True) as tmp:
+            # Copy fixture (Makefile + src/hello/hello.c)
+            shutil.copytree(str(FIXTURE), tmp, dirs_exist_ok=True)
+            # Override pyproject.toml to use editable_path + editable_command
+            (Path(tmp) / "pyproject.toml").write_text(
+                '[project]\nname = "hello"\nversion = "0.1.0"\n'
+                '[tool.just-buildit]\n'
+                'editable_path = "src"\n'
+                'editable_command = "make"\n'
+                'repair = false\n'
+            )
+            wheel_dir = Path(tmp) / "dist"
+            wheel_dir.mkdir()
+            orig = os.getcwd()
+            os.chdir(tmp)
+            try:
+                wheel_name = just_buildit.build_editable(str(wheel_dir))
+            finally:
+                os.chdir(orig)
+
+            # Extension compiled in-place into src/
+            ext_suffix = sc.get_config_var("EXT_SUFFIX")
+            src_dir = Path(tmp) / "src"
+            so_files = list(src_dir.glob(f"*{ext_suffix}"))
+            self.assertTrue(so_files, f"No extension in src/ after editable build; found: {list(src_dir.iterdir())}")
+
+            # Wheel is py3-none-any (only .pth inside)
+            self.assertIn("py3-none-any", wheel_name)
+
+            # .pth points at src/ — adding it to sys.path makes the extension importable
+            with zipfile.ZipFile(wheel_dir / wheel_name) as zf:
+                pth_files = [n for n in zf.namelist() if n.endswith(".pth")]
+                pth_target = zf.read(pth_files[0]).decode().strip()
+
+            sys.path.insert(0, pth_target)
+            try:
+                if "hello" in sys.modules:
+                    del sys.modules["hello"]
+                import hello
+                self.assertEqual(hello.add(2, 3), 5)
+            finally:
+                sys.path.remove(pth_target)
+                if "hello" in sys.modules:
+                    del sys.modules["hello"]
+
     def test_editable_path_produces_pth_wheel(self):
         """With editable_path set, build_editable() writes a .pth file — no build command."""
         with tempfile.TemporaryDirectory(prefix="jb-test-") as tmp:

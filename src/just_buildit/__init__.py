@@ -56,8 +56,19 @@ def build_editable(
         # No editable_path configured — fall back to a full wheel build.
         return build_wheel(wheel_directory, config_settings, metadata_directory)
 
-    # Fast path: write a .pth file pointing at the source tree.
-    # No build command is run; the C extension must already be compiled in place.
+    # If editable_command is set, run it in-place so extensions land in the
+    # source tree before the .pth is installed.  JUST_BUILDIT_OUTPUT_DIR is
+    # set to the editable source root so the command compiles directly there.
+    if config.editable_command is not None:
+        editable_output = (project_root / config.editable_path).resolve()
+        _build.run_editable_command(
+            name=config.name,
+            command=config.editable_command,
+            output_dir=editable_output,
+            project_root=project_root,
+        )
+
+    # Write a .pth file pointing at the source tree.
     with tempfile.TemporaryDirectory(prefix="just-buildit-") as tmp:
         output_dir = Path(tmp) / "output"
         output_dir.mkdir()

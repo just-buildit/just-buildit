@@ -12,6 +12,8 @@ Environment variables set for the build command:
   JUST_BUILDIT_INCLUDE_DIR   Python C header directory
   JUST_BUILDIT_OUTPUT_DIR    directory where the .so/.pyd must be placed
   JUST_BUILDIT_EXT_SUFFIX    full extension suffix (e.g. .cpython-312-x86_64-linux-gnu.so)
+  JUST_BUILDIT_LDFLAGS       platform link flags (before sources)
+  JUST_BUILDIT_LIBS          Python link flags (after -o, Windows/MinGW only)
 """
 
 from __future__ import annotations
@@ -143,6 +145,42 @@ def _default_build(
     return bool(c_files)
 
 
+def _make_env(*, name: str, output_dir: Path) -> tuple[dict[str, str], str]:
+    """
+    Return (env, ext_suffix) for a build command invocation.
+    Sets JUST_BUILDIT_* variables in a copy of os.environ.
+    Raises RuntimeError if sysconfig cannot supply required values.
+    """
+    include_dir = sysconfig.get_path("include")
+    ext_suffix = sysconfig.get_config_var("EXT_SUFFIX")
+    if not include_dir:
+        raise RuntimeError("Could not determine Python include directory via sysconfig.")
+    if not ext_suffix:
+        raise RuntimeError("Could not determine extension suffix via sysconfig.")
+    env = os.environ.copy()
+    env.update({
+        "JUST_BUILDIT_NAME":        name,
+        "JUST_BUILDIT_PYTHON":      sys.executable,
+        "JUST_BUILDIT_INCLUDE_DIR": include_dir,
+        "JUST_BUILDIT_OUTPUT_DIR":  str(output_dir),
+        "JUST_BUILDIT_EXT_SUFFIX":  ext_suffix,
+        "JUST_BUILDIT_LDFLAGS":     " ".join(_ldflags()),
+        "JUST_BUILDIT_LIBS":        " ".join(_python_link_flags()),
+    })
+    return env, ext_suffix
+
+
+def _print_env(env: dict[str, str], ext_suffix: str) -> None:
+    print(f"  JUST_BUILDIT_NAME        = {env['JUST_BUILDIT_NAME']}", flush=True)
+    print(f"  JUST_BUILDIT_PYTHON      = {env['JUST_BUILDIT_PYTHON']}", flush=True)
+    print(f"  JUST_BUILDIT_INCLUDE_DIR = {env['JUST_BUILDIT_INCLUDE_DIR']}", flush=True)
+    print(f"  JUST_BUILDIT_OUTPUT_DIR  = {env['JUST_BUILDIT_OUTPUT_DIR']}", flush=True)
+    print(f"  JUST_BUILDIT_EXT_SUFFIX  = {ext_suffix}", flush=True)
+    print(f"  JUST_BUILDIT_LDFLAGS     = {env['JUST_BUILDIT_LDFLAGS']}", flush=True)
+    if env["JUST_BUILDIT_LIBS"]:
+        print(f"  JUST_BUILDIT_LIBS        = {env['JUST_BUILDIT_LIBS']}", flush=True)
+
+
 def run_build(
     *,
     name: str,
@@ -155,15 +193,9 @@ def run_build(
     Run the build (user command or zero-config default) with JUST_BUILDIT_* env vars set.
     Returns output_dir — the wheel content root, containing all built artifacts.
     """
-    include_dir = sysconfig.get_path("include")
-    ext_suffix = sysconfig.get_config_var("EXT_SUFFIX")
-
-    if not include_dir:
-        raise RuntimeError("Could not determine Python include directory via sysconfig.")
-    if not ext_suffix:
-        raise RuntimeError("Could not determine extension suffix via sysconfig.")
-
     output_dir.mkdir(parents=True, exist_ok=True)
+    env, ext_suffix = _make_env(name=name, output_dir=output_dir)
+    include_dir = env["JUST_BUILDIT_INCLUDE_DIR"]
 
     needs_extension = True
 
@@ -177,26 +209,8 @@ def run_build(
             ext_suffix=ext_suffix,
         )
     else:
-        env = os.environ.copy()
-        env.update({
-            "JUST_BUILDIT_NAME": name,
-            "JUST_BUILDIT_PYTHON": sys.executable,
-            "JUST_BUILDIT_INCLUDE_DIR": include_dir,
-            "JUST_BUILDIT_OUTPUT_DIR": str(output_dir),
-            "JUST_BUILDIT_EXT_SUFFIX": ext_suffix,
-            "JUST_BUILDIT_LDFLAGS": " ".join(_ldflags()),
-            "JUST_BUILDIT_LIBS":    " ".join(_python_link_flags()),
-        })
-
         print(f"just-buildit: running build command: {command}", flush=True)
-        print(f"  JUST_BUILDIT_NAME        = {name}", flush=True)
-        print(f"  JUST_BUILDIT_PYTHON      = {sys.executable}", flush=True)
-        print(f"  JUST_BUILDIT_INCLUDE_DIR = {include_dir}", flush=True)
-        print(f"  JUST_BUILDIT_OUTPUT_DIR  = {output_dir}", flush=True)
-        print(f"  JUST_BUILDIT_EXT_SUFFIX  = {ext_suffix}", flush=True)
-        print(f"  JUST_BUILDIT_LDFLAGS     = {env['JUST_BUILDIT_LDFLAGS']}", flush=True)
-        if env["JUST_BUILDIT_LIBS"]:
-            print(f"  JUST_BUILDIT_LIBS        = {env['JUST_BUILDIT_LIBS']}", flush=True)
+        _print_env(env, ext_suffix)
 
         result = subprocess.run(
             shlex.split(command),
@@ -215,6 +229,34 @@ def run_build(
         )
 
     return output_dir
+
+
+def run_editable_command(
+    *,
+    name: str,
+    command: str,
+    output_dir: Path,
+    project_root: Path,
+) -> None:
+    """
+    Run the editable build command with JUST_BUILDIT_OUTPUT_DIR pointing at the
+    source tree (project_root / editable_path). Extensions are compiled in-place
+    so imports work immediately after the editable install.
+    """
+    env, ext_suffix = _make_env(name=name, output_dir=output_dir)
+
+    print(f"just-buildit: running editable command: {command}", flush=True)
+    _print_env(env, ext_suffix)
+
+    result = subprocess.run(
+        shlex.split(command),
+        cwd=str(project_root),
+        env=env,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"Editable build command failed with exit code {result.returncode}:\n  {command}"
+        )
 
 
 def run_repair(
