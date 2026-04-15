@@ -26,7 +26,7 @@ Got a single C extension in `src/mylib/`? No configuration needed:
 ```toml
 [build-system]
 requires = ["just-buildit"]
-build-backend = "just_build"
+build-backend = "just_buildit"
 
 [project]
 name = "mylib"
