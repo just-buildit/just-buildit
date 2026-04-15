@@ -30,7 +30,9 @@ jobs:
           python-version: '3.12'
 
       - name: Install deps
-        run: uv sync --group dev
+        run: |
+          PYTHONPATH=src uv pip install --no-build-isolation -e .
+          uv sync --group dev --no-build-isolation
 
       - name: Build Zensical site
         run: uv run zensical build --clean

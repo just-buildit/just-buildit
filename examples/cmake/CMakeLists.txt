@@ -4,6 +4,6 @@ project(add C)
 find_package(Python3 COMPONENTS Development.Module REQUIRED)
 Python3_add_library(add MODULE src/add.c)
 set_target_properties(add PROPERTIES
-    OUTPUT_NAME "$ENV{JUST_BUILD_NAME}"
-    SUFFIX      "$ENV{JUST_BUILD_EXT_SUFFIX}"
+    OUTPUT_NAME "$ENV{JUST_BUILDIT_NAME}"
+    SUFFIX      "$ENV{JUST_BUILDIT_EXT_SUFFIX}"
     PREFIX      "")
