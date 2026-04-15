@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/logo-wordmark.svg" alt="just-build" width="480">
+  <img src="docs/assets/logo-wordmark.svg" alt="just-buildit" width="540">
 </p>
 
 [![CI](https://github.com/just-buildit/just-build/actions/workflows/ci.yml/badge.svg)](https://github.com/just-buildit/just-build/actions/workflows/ci.yml)
