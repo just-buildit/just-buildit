@@ -51,6 +51,14 @@ command = "make"
 just-buildit sets environment variables, calls your command, packages everything
 written to `$JUST_BUILDIT_OUTPUT_DIR`, and ships the result.
 
+### CLI
+
+```sh
+uvx just-buildit inspect   # dry-run: show config and what would be built
+uvx just-buildit build     # build wheel into dist/
+uvx just-buildit sdist     # build source distribution into dist/
+```
+
 ---
 
 ## Documentation
