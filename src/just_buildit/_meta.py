@@ -7,8 +7,8 @@ Extracts:
   - project.description        (optional → METADATA Summary)
   - project.readme             (optional → METADATA Description + content-type)
   - project.requires-python   (optional → METADATA Requires-Python)
-  - tool.just-build.command   (optional; omit for zero-config src/{name}/ default)
-  - tool.just-build.repair    (optional; auto-detected if omitted, False to skip)
+  - tool.just-buildit.command   (optional; omit for zero-config src/{name}/ default)
+  - tool.just-buildit.repair    (optional; auto-detected if omitted, False to skip)
 """
 
 from __future__ import annotations
@@ -75,7 +75,7 @@ def load(project_root: Path) -> BuildConfig:
     if not version:
         raise ValueError("[project] version is required in pyproject.toml")
 
-    jb = data.get("tool", {}).get("just-build", {})
+    jb = data.get("tool", {}).get("just-buildit", {})
 
     command = jb.get("command") or None        # None → zero-config src/{package}/ default
     package = jb.get("package") or None        # override package dir name for src/ lookup

@@ -103,10 +103,10 @@ def _default_build(
     src_dir = project_root / "src" / package
     if not src_dir.is_dir():
         raise FileNotFoundError(
-            f"No command set in [tool.just-build] and no src/{package}/ directory found.\n\n"
+            f"No command set in [tool.just-buildit] and no src/{package}/ directory found.\n\n"
             f"For zero-config builds, put your sources in src/{package}/\n"
             f"Or set a build command:\n\n"
-            f"  [tool.just-build]\n"
+            f"  [tool.just-buildit]\n"
             f'  command = "make"\n'
         )
 
@@ -253,7 +253,7 @@ def run_repair(
                 "  dnf:  sudo dnf install patchelf\n"
                 "  brew: brew install patchelf\n\n"
                 "Or disable repair in pyproject.toml:\n"
-                "  [tool.just-build]\n"
+                "  [tool.just-buildit]\n"
                 "  repair = false"
             )
 

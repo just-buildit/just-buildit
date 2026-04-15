@@ -3,7 +3,7 @@
 ## Makefile
 
 ```toml
-[tool.just-build]
+[tool.just-buildit]
 command = "make"
 ```
 
@@ -25,7 +25,7 @@ $(TARGET):
 ## CMake
 
 ```toml
-[tool.just-build]
+[tool.just-buildit]
 command = "make pyext"
 ```
 
@@ -56,7 +56,7 @@ set_target_properties(mylib PROPERTIES
 ## Meson
 
 ```toml
-[tool.just-build]
+[tool.just-buildit]
 command = "make pyext"
 ```
 
@@ -89,7 +89,7 @@ src/mylib/
 ```
 
 ```toml
-[tool.just-build]
+[tool.just-buildit]
 command = "make"
 ```
 

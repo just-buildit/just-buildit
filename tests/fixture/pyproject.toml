@@ -9,6 +9,6 @@ description = "Minimal C extension fixture for just-build integration tests."
 readme = "README.md"
 requires-python = ">=3.11"
 
-[tool.just-build]
+[tool.just-buildit]
 command = "make"
 repair = false   # skip repair in tests; auditwheel not required in CI

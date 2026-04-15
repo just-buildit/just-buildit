@@ -3,7 +3,7 @@
 ## Full reference
 
 ```toml
-[tool.just-build]
+[tool.just-buildit]
 command       = "make"        # optional — omit for zero-config src/{package}/ build
 package       = "my_package"  # optional — package dir name when it differs from project name
 editable_path = "src"         # optional — src root for fast .pth-file editable installs
@@ -31,7 +31,7 @@ just-buildit automatically runs the right repair tool for your platform:
 Override or disable repair in your config:
 
 ```toml
-[tool.just-build]
+[tool.just-buildit]
 command = "make"
 repair = "uvx auditwheel repair --plat manylinux_2_28_x86_64"  # custom
 # repair = false  # skip entirely
@@ -44,7 +44,7 @@ repair = "uvx auditwheel repair --plat manylinux_2_28_x86_64"  # custom
 Set `editable_path` to the directory that should be added to `sys.path`:
 
 ```toml
-[tool.just-build]
+[tool.just-buildit]
 command       = "make"
 editable_path = "src"
 ```

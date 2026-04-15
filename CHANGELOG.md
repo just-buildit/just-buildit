@@ -10,6 +10,11 @@
   requires = ["just-buildit"]
   build-backend = "just_buildit"   # was: just_build
   ```
+- Renamed config section from `[tool.just-build]` to `[tool.just-buildit]`. Update your `pyproject.toml`:
+  ```toml
+  [tool.just-buildit]   # was: [tool.just-build]
+  command = "make"
+  ```
 - Renamed all environment variables from `JUST_BUILD_*` to `JUST_BUILDIT_*`. Update your Makefiles and build scripts:
   - `JUST_BUILD_NAME` → `JUST_BUILDIT_NAME`
   - `JUST_BUILD_PYTHON` → `JUST_BUILDIT_PYTHON`

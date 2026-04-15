@@ -87,7 +87,7 @@ class TestBuildEditable(unittest.TestCase):
             src_dir.mkdir()
             (Path(tmp) / "pyproject.toml").write_text(
                 '[project]\nname = "foo"\nversion = "0.1.0"\n'
-                '[tool.just-build]\neditable_path = "src"\nrepair = false\n'
+                '[tool.just-buildit]\neditable_path = "src"\nrepair = false\n'
             )
             wheel_dir = Path(tmp) / "dist"
             wheel_dir.mkdir()
@@ -186,7 +186,7 @@ class TestBuildWheel(unittest.TestCase):
 
 
 class TestDefaultBuild(unittest.TestCase):
-    """Zero-config src/{name}/ path — no Makefile, no [tool.just-build] command."""
+    """Zero-config src/{name}/ path — no Makefile, no [tool.just-buildit] command."""
 
     def _build_noconfig(self, wheel_dir: Path) -> str:
         orig = os.getcwd()
@@ -299,7 +299,7 @@ class TestErrorHandling(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix="jb-test-") as tmp:
             (Path(tmp) / "pyproject.toml").write_text(
                 '[project]\nname = "foo"\nversion = "0.1.0"\n'
-                '[tool.just-build]\ncommand = "true"\nrepair = false\n'
+                '[tool.just-buildit]\ncommand = "true"\nrepair = false\n'
             )
             orig = os.getcwd()
             os.chdir(tmp)

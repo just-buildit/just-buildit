@@ -44,7 +44,7 @@ file it contains, and ships the result.
 For anything more complex, point it at your build command:
 
 ```toml
-[tool.just-build]
+[tool.just-buildit]
 command = "make"
 ```
 

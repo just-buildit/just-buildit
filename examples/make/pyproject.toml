@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "just-build zero-config example — no Makefile, no command."
 requires-python = ">=3.11"
 
-[tool.just-build]
+[tool.just-buildit]
 repair = false
 # Zero-config means no build command — just-build finds src/add/add.c
 # and compiles it automatically. Repair is a separate distribution concern.
