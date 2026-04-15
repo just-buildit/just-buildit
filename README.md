@@ -7,7 +7,7 @@
 
 The missing [PEP 517](https://peps.python.org/pep-0517/) build backend for C extensions.
 
-You know how to build your project. just-build knows how to package it.
+You know how to build your project. just-buildit knows how to package it.
 That's the whole deal.
 
 ---
@@ -20,7 +20,7 @@ bigger than your project. There's no option that just says:
 
 > "Here are your C files. Build them however you want. I'll ship the result."
 
-just-build is that option.
+just-buildit is that option.
 
 ---
 
@@ -38,7 +38,7 @@ name = "mylib"
 version = "0.1.0"
 ```
 
-Run `pip install .` and just-build finds `src/mylib/`, compiles every `.c`
+Run `pip install .` and just-buildit finds `src/mylib/`, compiles every `.c`
 file it contains, and ships the result.
 
 For anything more complex, point it at your build command:
@@ -48,7 +48,7 @@ For anything more complex, point it at your build command:
 command = "make"
 ```
 
-just-build sets environment variables, calls your command, packages everything
+just-buildit sets environment variables, calls your command, packages everything
 written to `$JUST_BUILDIT_OUTPUT_DIR`, and ships the result.
 
 ---
@@ -57,7 +57,7 @@ written to `$JUST_BUILDIT_OUTPUT_DIR`, and ships the result.
 
 | | |
 |---|---|
-| [Environment variables](docs/environment-variables.md) | What just-build sets before calling your command |
+| [Environment variables](docs/environment-variables.md) | What just-buildit sets before calling your command |
 | [Examples](docs/examples.md) | Makefile, CMake, Meson, mixed Python + C |
 | [Configuration](docs/configuration.md) | Full config reference, wheel repair, editable installs |
 | [Contributing](docs/contributing.md) | Running tests, platform support, bootstrapping |

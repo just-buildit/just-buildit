@@ -27,14 +27,14 @@ CI runs on all three platforms on every push.
 
 ## Bootstrapping (offline or pre-release)
 
-just-build is a pure Python package with no dependencies. If you need it
+just-buildit is a pure Python package with no dependencies. If you need it
 before it can be fetched from PyPI — air-gapped environment, initial release
 bootstrap, or simply testing a local change — add the source directly to your
 path:
 
 ```sh
 git clone https://github.com/just-buildit/just-buildit.git
-export PYTHONPATH=/path/to/just-build/src:$PYTHONPATH
+export PYTHONPATH=/path/to/just-buildit/src:$PYTHONPATH
 ```
 
 Then use your build frontend with `--no-isolation` so it picks up the local

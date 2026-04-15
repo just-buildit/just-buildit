@@ -20,7 +20,7 @@ exclude = [                   # optional — glob patterns relative to $JUST_BUI
 
 ## Wheel repair
 
-just-build automatically runs the right repair tool for your platform:
+just-buildit automatically runs the right repair tool for your platform:
 
 | Platform | Tool |
 |---|---|
