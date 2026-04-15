@@ -62,23 +62,47 @@ class TestNoDependencies(unittest.TestCase):
 
 class TestBuildEditable(unittest.TestCase):
 
-    def test_no_editable_path_falls_back_to_build_wheel(self):
-        """Without editable_path, build_editable() produces a full compiled wheel."""
+    def test_no_src_dir_falls_back_to_build_wheel(self):
+        """Without editable_path and no src/ directory, build_editable() falls back to build_wheel."""
         with tempfile.TemporaryDirectory(prefix="jb-test-") as tmp:
+            # No src/ directory — auto-detect won't trigger, fallback to build_wheel.
+            # No command either → zero-config tries src/foo/ → FileNotFoundError proves fallback.
+            (Path(tmp) / "pyproject.toml").write_text(
+                '[project]\nname = "foo"\nversion = "0.1.0"\n'
+            )
             wheel_dir = Path(tmp) / "dist"
             wheel_dir.mkdir()
             orig = os.getcwd()
-            os.chdir(FIXTURE)
+            os.chdir(tmp)
+            try:
+                with self.assertRaises(FileNotFoundError):
+                    just_buildit.build_editable(str(wheel_dir))
+            finally:
+                os.chdir(orig)
+
+    def test_src_dir_auto_detected_for_editable(self):
+        """Without editable_path, build_editable() defaults to src/ when it exists."""
+        with tempfile.TemporaryDirectory(prefix="jb-test-") as tmp:
+            src_dir = Path(tmp) / "src"
+            src_dir.mkdir()
+            (Path(tmp) / "pyproject.toml").write_text(
+                '[project]\nname = "foo"\nversion = "0.1.0"\n'
+                '[tool.just-buildit]\nrepair = false\n'
+            )
+            wheel_dir = Path(tmp) / "dist"
+            wheel_dir.mkdir()
+            orig = os.getcwd()
+            os.chdir(tmp)
             try:
                 wheel_name = just_buildit.build_editable(str(wheel_dir))
             finally:
                 os.chdir(orig)
-            wheel_path = wheel_dir / wheel_name
-            self.assertTrue(wheel_path.exists())
-            self.assertTrue(zipfile.is_zipfile(wheel_path))
-            with zipfile.ZipFile(wheel_path) as zf:
-                names = zf.namelist()
-            self.assertTrue(any(n.endswith((".so", ".pyd")) for n in names))
+            self.assertIn("py3-none-any", wheel_name)
+            with zipfile.ZipFile(wheel_dir / wheel_name) as zf:
+                pth_files = [n for n in zf.namelist() if n.endswith(".pth")]
+                pth_content = zf.read(pth_files[0]).decode().strip()
+            self.assertEqual(len(pth_files), 1)
+            self.assertEqual(pth_content, str(src_dir.resolve()))
 
     def test_editable_path_produces_pth_wheel(self):
         """With editable_path set, build_editable() writes a .pth file — no build command."""

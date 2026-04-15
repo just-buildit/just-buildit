@@ -12,7 +12,7 @@ Public surface (PEP 517):
 
 from __future__ import annotations
 
-__version__ = "0.2.3"
+__version__ = "0.2.4"
 
 import tempfile
 from pathlib import Path
@@ -52,8 +52,13 @@ def build_editable(
     wheel_dir = Path(wheel_directory)
     config = _meta.load(project_root)
 
-    if config.editable_path is None:
-        # No editable_path configured — fall back to a full wheel build.
+    # Resolve the editable source root: explicit config wins; src/ is the default
+    # for the conventional src-layout; anything else falls back to a full wheel build.
+    if config.editable_path is not None:
+        editable_path = config.editable_path
+    elif (project_root / "src").is_dir():
+        editable_path = "src"
+    else:
         return build_wheel(wheel_directory, config_settings, metadata_directory)
 
     # Write a .pth file pointing at the source tree.
@@ -62,7 +67,7 @@ def build_editable(
         output_dir = Path(tmp) / "output"
         output_dir.mkdir()
 
-        pth_target = (project_root / config.editable_path).resolve()
+        pth_target = (project_root / editable_path).resolve()
         pth_name = _normalize_name(config.name) + ".pth"
         (output_dir / pth_name).write_text(str(pth_target) + "\n", encoding="utf-8")
 

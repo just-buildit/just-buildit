@@ -9,7 +9,7 @@ Extracts:
   - project.requires-python       (optional → METADATA Requires-Python)
   - tool.just-buildit.command        (optional; omit for zero-config src/{name}/ default)
   - tool.just-buildit.repair         (optional; auto-detected if omitted, False to skip)
-  - tool.just-buildit.editable_path  (optional; src root for .pth editable installs)
+  - tool.just-buildit.editable_path  (optional; src root for .pth editable installs; defaults to src/ if present)
 """
 
 from __future__ import annotations
