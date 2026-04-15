@@ -1,6 +1,6 @@
 [build-system]
 requires = ["just-buildit"]
-build-backend = "just_build"
+build-backend = "just_buildit"
 
 [project]
 name = "add"

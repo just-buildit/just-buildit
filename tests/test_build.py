@@ -26,36 +26,36 @@ from pathlib import Path
 
 FIXTURE = Path(__file__).parent / "fixture"
 FIXTURE_NOCONFIG = Path(__file__).parent / "fixture_noconfig"
-JUST_BUILD = Path(__file__).parent.parent / "src" / "just_build"
+JUST_BUILD = Path(__file__).parent.parent / "src" / "just_buildit"
 
 
-def _load_just_build():
-    """Import just_build from source without installation."""
+def _load_just_buildit():
+    """Import just_buildit from source without installation."""
     for sub in ("_meta", "_build", "_wheel"):
         sub_spec = importlib.util.spec_from_file_location(
-            f"just_build.{sub}", JUST_BUILD / f"{sub}.py"
+            f"just_buildit.{sub}", JUST_BUILD / f"{sub}.py"
         )
         sub_mod = importlib.util.module_from_spec(sub_spec)
-        sys.modules[f"just_build.{sub}"] = sub_mod
+        sys.modules[f"just_buildit.{sub}"] = sub_mod
         sub_spec.loader.exec_module(sub_mod)
 
     spec = importlib.util.spec_from_file_location(
-        "just_build",
+        "just_buildit",
         JUST_BUILD / "__init__.py",
         submodule_search_locations=[str(JUST_BUILD)],
     )
     mod = importlib.util.module_from_spec(spec)
-    sys.modules["just_build"] = mod
+    sys.modules["just_buildit"] = mod
     spec.loader.exec_module(mod)
     return mod
 
 
-just_build = _load_just_build()
+just_buildit = _load_just_buildit()
 
 
 class TestNoDependencies(unittest.TestCase):
     def test_get_requires_returns_empty_list(self):
-        result = just_build.get_requires_for_build_wheel()
+        result = just_buildit.get_requires_for_build_wheel()
         self.assertEqual(result, [])
         self.assertIsInstance(result, list)
 
@@ -70,7 +70,7 @@ class TestBuildEditable(unittest.TestCase):
             orig = os.getcwd()
             os.chdir(FIXTURE)
             try:
-                wheel_name = just_build.build_editable(str(wheel_dir))
+                wheel_name = just_buildit.build_editable(str(wheel_dir))
             finally:
                 os.chdir(orig)
             wheel_path = wheel_dir / wheel_name
@@ -94,7 +94,7 @@ class TestBuildEditable(unittest.TestCase):
             orig = os.getcwd()
             os.chdir(tmp)
             try:
-                wheel_name = just_build.build_editable(str(wheel_dir))
+                wheel_name = just_buildit.build_editable(str(wheel_dir))
             finally:
                 os.chdir(orig)
             wheel_path = wheel_dir / wheel_name
@@ -118,7 +118,7 @@ class TestBuildWheel(unittest.TestCase):
         orig = os.getcwd()
         os.chdir(FIXTURE)
         try:
-            return just_build.build_wheel(str(wheel_dir))
+            return just_buildit.build_wheel(str(wheel_dir))
         finally:
             os.chdir(orig)
 
@@ -192,7 +192,7 @@ class TestDefaultBuild(unittest.TestCase):
         orig = os.getcwd()
         os.chdir(FIXTURE_NOCONFIG)
         try:
-            return just_build.build_wheel(str(wheel_dir))
+            return just_buildit.build_wheel(str(wheel_dir))
         finally:
             os.chdir(orig)
 
@@ -229,7 +229,7 @@ class TestDefaultBuild(unittest.TestCase):
 class TestBuildEnv(unittest.TestCase):
     """Verify platform-specific build environment helpers."""
 
-    _build = sys.modules["just_build._build"]
+    _build = sys.modules["just_buildit._build"]
 
     def test_ldflags_nonempty(self):
         flags = self._build._ldflags()
@@ -254,19 +254,19 @@ class TestBuildEnv(unittest.TestCase):
             self.assertNotIn("-dynamiclib", flags)
 
     def test_python_link_flags_windows(self):
-        """On Windows, JUST_BUILD_LIBS carries -L and -lpython for the linker."""
+        """On Windows, JUST_BUILDIT_LIBS carries -L and -lpython for the linker."""
         if platform.system() != "Windows":
             self.skipTest("Windows-only")
         flags = self._build._python_link_flags()
         self.assertTrue(flags)
         self.assertTrue(any(f.startswith("-L") for f in flags))
         self.assertTrue(any(f.startswith("-lpython") for f in flags))
-        # JUST_BUILD_LDFLAGS must NOT include -l flags (linker order)
+        # JUST_BUILDIT_LDFLAGS must NOT include -l flags (linker order)
         ldflags = self._build._ldflags()
         self.assertFalse(any(f.startswith("-l") for f in ldflags))
 
     def test_python_link_flags_non_windows(self):
-        """On Linux/macOS Python symbols resolve at runtime — JUST_BUILD_LIBS is empty."""
+        """On Linux/macOS Python symbols resolve at runtime — JUST_BUILDIT_LIBS is empty."""
         if platform.system() == "Windows":
             self.skipTest("non-Windows only")
         self.assertEqual(self._build._python_link_flags(), [])
@@ -290,7 +290,7 @@ class TestErrorHandling(unittest.TestCase):
             os.chdir(tmp)
             try:
                 with self.assertRaises(FileNotFoundError) as ctx:
-                    just_build.build_wheel(tmp)
+                    just_buildit.build_wheel(tmp)
                 self.assertIn("src/foo/", str(ctx.exception))
             finally:
                 os.chdir(orig)
@@ -305,8 +305,8 @@ class TestErrorHandling(unittest.TestCase):
             os.chdir(tmp)
             try:
                 with self.assertRaises(FileNotFoundError) as ctx:
-                    just_build.build_wheel(tmp)
-                self.assertIn("$JUST_BUILD_OUTPUT_DIR", str(ctx.exception))
+                    just_buildit.build_wheel(tmp)
+                self.assertIn("$JUST_BUILDIT_OUTPUT_DIR", str(ctx.exception))
             finally:
                 os.chdir(orig)
 

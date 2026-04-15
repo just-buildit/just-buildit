@@ -2,16 +2,16 @@
 _build.py — invoke the user's build command and verify the output.
 
 Contract:
-  - Set JUST_BUILD_* env vars
+  - Set JUST_BUILDIT_* env vars
   - Call the user's command via subprocess
   - Verify the expected output file exists
   - Return the path to the built extension
 
 Environment variables set for the build command:
-  JUST_BUILD_NAME          extension module name (e.g. "hello")
-  JUST_BUILD_INCLUDE_DIR   Python C header directory
-  JUST_BUILD_OUTPUT_DIR    directory where the .so/.pyd must be placed
-  JUST_BUILD_EXT_SUFFIX    full extension suffix (e.g. .cpython-312-x86_64-linux-gnu.so)
+  JUST_BUILDIT_NAME          extension module name (e.g. "hello")
+  JUST_BUILDIT_INCLUDE_DIR   Python C header directory
+  JUST_BUILDIT_OUTPUT_DIR    directory where the .so/.pyd must be placed
+  JUST_BUILDIT_EXT_SUFFIX    full extension suffix (e.g. .cpython-312-x86_64-linux-gnu.so)
 """
 
 from __future__ import annotations
@@ -19,6 +19,7 @@ from __future__ import annotations
 import os
 import platform
 import shlex
+import shutil
 import subprocess
 import sys
 import sysconfig
@@ -151,7 +152,7 @@ def run_build(
     project_root: Path,
 ) -> Path:
     """
-    Run the build (user command or zero-config default) with JUST_BUILD_* env vars set.
+    Run the build (user command or zero-config default) with JUST_BUILDIT_* env vars set.
     Returns output_dir — the wheel content root, containing all built artifacts.
     """
     include_dir = sysconfig.get_path("include")
@@ -178,24 +179,24 @@ def run_build(
     else:
         env = os.environ.copy()
         env.update({
-            "JUST_BUILD_NAME": name,
-            "JUST_BUILD_PYTHON": sys.executable,
-            "JUST_BUILD_INCLUDE_DIR": include_dir,
-            "JUST_BUILD_OUTPUT_DIR": str(output_dir),
-            "JUST_BUILD_EXT_SUFFIX": ext_suffix,
-            "JUST_BUILD_LDFLAGS": " ".join(_ldflags()),
-            "JUST_BUILD_LIBS":    " ".join(_python_link_flags()),
+            "JUST_BUILDIT_NAME": name,
+            "JUST_BUILDIT_PYTHON": sys.executable,
+            "JUST_BUILDIT_INCLUDE_DIR": include_dir,
+            "JUST_BUILDIT_OUTPUT_DIR": str(output_dir),
+            "JUST_BUILDIT_EXT_SUFFIX": ext_suffix,
+            "JUST_BUILDIT_LDFLAGS": " ".join(_ldflags()),
+            "JUST_BUILDIT_LIBS":    " ".join(_python_link_flags()),
         })
 
         print(f"just-build: running build command: {command}", flush=True)
-        print(f"  JUST_BUILD_NAME        = {name}", flush=True)
-        print(f"  JUST_BUILD_PYTHON      = {sys.executable}", flush=True)
-        print(f"  JUST_BUILD_INCLUDE_DIR = {include_dir}", flush=True)
-        print(f"  JUST_BUILD_OUTPUT_DIR  = {output_dir}", flush=True)
-        print(f"  JUST_BUILD_EXT_SUFFIX  = {ext_suffix}", flush=True)
-        print(f"  JUST_BUILD_LDFLAGS     = {env['JUST_BUILD_LDFLAGS']}", flush=True)
-        if env["JUST_BUILD_LIBS"]:
-            print(f"  JUST_BUILD_LIBS        = {env['JUST_BUILD_LIBS']}", flush=True)
+        print(f"  JUST_BUILDIT_NAME        = {name}", flush=True)
+        print(f"  JUST_BUILDIT_PYTHON      = {sys.executable}", flush=True)
+        print(f"  JUST_BUILDIT_INCLUDE_DIR = {include_dir}", flush=True)
+        print(f"  JUST_BUILDIT_OUTPUT_DIR  = {output_dir}", flush=True)
+        print(f"  JUST_BUILDIT_EXT_SUFFIX  = {ext_suffix}", flush=True)
+        print(f"  JUST_BUILDIT_LDFLAGS     = {env['JUST_BUILDIT_LDFLAGS']}", flush=True)
+        if env["JUST_BUILDIT_LIBS"]:
+            print(f"  JUST_BUILDIT_LIBS        = {env['JUST_BUILDIT_LIBS']}", flush=True)
 
         result = subprocess.run(
             shlex.split(command),
@@ -210,7 +211,7 @@ def run_build(
     if needs_extension and not list(output_dir.rglob(f"*{ext_suffix}")):
         raise FileNotFoundError(
             f"Build produced no extension (*{ext_suffix}) in {output_dir}\n\n"
-            f"Make sure your build command writes extensions to $JUST_BUILD_OUTPUT_DIR"
+            f"Make sure your build command writes extensions to $JUST_BUILDIT_OUTPUT_DIR"
         )
 
     return output_dir
@@ -242,12 +243,26 @@ def run_repair(
             )
             return wheel_path
 
+    # On Linux, auditwheel requires patchelf — check early for a clear error.
+    if platform.system() == "Linux" and "auditwheel" in repair_command:
+        if not shutil.which("patchelf"):
+            raise RuntimeError(
+                "auditwheel requires patchelf, but it was not found on PATH.\n\n"
+                "Install it with your system package manager:\n"
+                "  apt:  sudo apt install patchelf\n"
+                "  dnf:  sudo dnf install patchelf\n"
+                "  brew: brew install patchelf\n\n"
+                "Or disable repair in pyproject.toml:\n"
+                "  [tool.just-build]\n"
+                "  repair = false"
+            )
+
     # Repair into a temp subdirectory so the tool never writes into the same
     # directory as the input wheel — on Windows this causes a PermissionError
     # when pip holds the source file open.
     with tempfile.TemporaryDirectory(dir=wheel_dir, prefix="_repair_") as repair_tmp:
         cmd = shlex.split(repair_command) + [str(wheel_path), "-w", repair_tmp]
-        print(f"just-build: repairing wheel: {shlex.join(cmd)}", flush=True)
+        print(f"just-buildit: repairing wheel: {shlex.join(cmd)}", flush=True)
 
         result = subprocess.run(cmd)
         if result.returncode != 0:

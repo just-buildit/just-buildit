@@ -18,18 +18,18 @@ from pathlib import Path
 EXAMPLES = Path(__file__).parent.parent / "examples"
 SRC = Path(__file__).parent.parent / "src"
 
-# Put just_build on the path so it can be imported without installation.
+# Put just_buildit on the path so it can be imported without installation.
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-import just_build  # noqa: E402
+import just_buildit  # noqa: E402
 
 
 def _build_example(example_dir: Path, wheel_dir: Path) -> str:
     orig = os.getcwd()
     os.chdir(example_dir)
     try:
-        return just_build.build_wheel(str(wheel_dir))
+        return just_buildit.build_wheel(str(wheel_dir))
     finally:
         os.chdir(orig)
 

@@ -49,7 +49,7 @@ command = "make"
 ```
 
 just-build sets environment variables, calls your command, packages everything
-written to `$JUST_BUILD_OUTPUT_DIR`, and ships the result.
+written to `$JUST_BUILDIT_OUTPUT_DIR`, and ships the result.
 
 ---
 

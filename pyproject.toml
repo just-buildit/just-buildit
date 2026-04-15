@@ -1,14 +1,14 @@
 [build-system]
 requires = ["just-buildit"]
-build-backend = "just_build"
+build-backend = "just_buildit"
 
 [tool.just-build]
-package = "just_build"
+package = "just_buildit"
 repair = false
 
 [project]
 name = "just-buildit"
-version = "0.1.5"
+version = "0.2.0"
 description = "The missing PEP 517 build backend for C extensions."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -18,6 +18,9 @@ dependencies = []
 dev = [
     "zensical>=0.0.29",
 ]
+
+[project.scripts]
+just-buildit = "just_build._cli:main"
 
 [project.urls]
 Homepage = "https://github.com/just-buildit/just-build"

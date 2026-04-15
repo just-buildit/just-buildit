@@ -1,21 +1,23 @@
 """
-just-build — minimum viable PEP 517 build backend for C extensions.
+just-buildit — minimum viable PEP 517 build backend for C extensions.
 
 Public surface (PEP 517):
   get_requires_for_build_wheel()
   prepare_metadata_for_build_wheel()
   build_wheel()
   build_editable()
+  get_requires_for_build_sdist()
+  build_sdist()
 """
 
 from __future__ import annotations
 
-__version__ = "0.1.2"
+__version__ = "0.2.0"
 
 import tempfile
 from pathlib import Path
 
-from . import _build, _meta, _wheel
+from . import _build, _meta, _sdist, _wheel
 from ._wheel import _normalize_name
 
 
@@ -123,3 +125,24 @@ def build_wheel(
         )
 
     return final_wheel.name
+
+
+def get_requires_for_build_sdist(config_settings=None) -> list[str]:
+    return []
+
+
+def build_sdist(
+    sdist_directory: str,
+    config_settings=None,
+) -> str:
+    project_root = Path.cwd()
+    sdist_dir = Path(sdist_directory)
+    sdist_dir.mkdir(parents=True, exist_ok=True)
+
+    config = _meta.load(project_root)
+    sdist_path = _sdist.build_sdist(
+        project_root=project_root,
+        sdist_dir=sdist_dir,
+        config=config,
+    )
+    return sdist_path.name

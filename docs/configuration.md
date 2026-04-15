@@ -8,7 +8,7 @@ command       = "make"        # optional — omit for zero-config src/{package}/
 package       = "my_package"  # optional — package dir name when it differs from project name
 editable_path = "src"         # optional — src root for fast .pth-file editable installs
 repair        = "uvx ..."     # optional — auto-detected by platform, or false to skip
-exclude = [                   # optional — glob patterns relative to $JUST_BUILD_OUTPUT_DIR
+exclude = [                   # optional — glob patterns relative to $JUST_BUILDIT_OUTPUT_DIR
     "mypkg/tests/**",
     "mypkg/bench/**",
 ]

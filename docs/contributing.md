@@ -48,5 +48,5 @@ python -m build --wheel --no-isolation
 uv build --no-build-isolation
 ```
 
-No build step, no compiler, no install required. `src/just_build/` is
+No build step, no compiler, no install required. `src/just_buildit/` is
 importable as-is.
