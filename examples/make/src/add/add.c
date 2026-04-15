@@ -1,5 +1,5 @@
 /*
- * add.c — zero-config just-build example.
+ * add.c — zero-config just-buildit example.
  * No Makefile. No command. Just source.
  *
  * Exports: add.add(a, b) -> int

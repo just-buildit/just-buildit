@@ -1,5 +1,5 @@
 """
-_meta.py — parse pyproject.toml for just-build.
+_meta.py — parse pyproject.toml for just-buildit.
 
 Extracts:
   - project.name

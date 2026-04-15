@@ -1,11 +1,11 @@
 [build-system]
-requires = ["just-build"]
+requires = ["just-buildit"]
 build-backend = "just_buildit"
 
 [project]
 name = "hello"
 version = "0.1.0"
-description = "Zero-config fixture for just-build integration tests."
+description = "Zero-config fixture for just-buildit integration tests."
 requires-python = ">=3.11"
 
 [tool.just-buildit]

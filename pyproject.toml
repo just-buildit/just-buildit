@@ -2,7 +2,7 @@
 requires = ["just-buildit"]
 build-backend = "just_buildit"
 
-[tool.just-build]
+[tool.just-buildit]
 package = "just_buildit"
 repair = false
 

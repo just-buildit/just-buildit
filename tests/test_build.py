@@ -1,5 +1,5 @@
 """
-Integration tests for just-build.
+Integration tests for just-buildit.
 
 Tests:
   1. get_requires_for_build_wheel() → [] (no deps, ever)

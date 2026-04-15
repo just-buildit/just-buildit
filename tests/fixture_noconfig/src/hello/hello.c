@@ -1,5 +1,5 @@
 /*
- * hello.c — minimal CPython extension for just-build integration tests.
+ * hello.c — minimal CPython extension for just-buildit integration tests.
  *
  * Exports one function: hello.add(a, b) -> int
  */

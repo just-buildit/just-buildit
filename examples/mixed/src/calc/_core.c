@@ -1,5 +1,5 @@
 /*
- * _core.c — just-build mixed pure/platform example.
+ * _core.c — just-buildit mixed pure/platform example.
  *
  * Exports: calc._core.add(a, b) -> int
  *          calc._core.multiply(a, b) -> int

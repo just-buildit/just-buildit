@@ -5,7 +5,7 @@ build-backend = "just_buildit"
 [project]
 name = "calc"
 version = "0.1.0"
-description = "just-build mixed pure/platform example."
+description = "just-buildit mixed pure/platform example."
 requires-python = ">=3.11"
 
 [tool.just-buildit]

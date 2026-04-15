@@ -7,7 +7,7 @@ just-buildit sets these before calling your command:
 | `JUST_BUILDIT_NAME` | `mylib` |
 | `JUST_BUILDIT_PYTHON` | `/usr/bin/python3.12` |
 | `JUST_BUILDIT_INCLUDE_DIR` | `/usr/include/python3.12` |
-| `JUST_BUILDIT_OUTPUT_DIR` | `/tmp/just-build-xyz/output` |
+| `JUST_BUILDIT_OUTPUT_DIR` | `/tmp/just-buildit-xyz/output` |
 | `JUST_BUILDIT_EXT_SUFFIX` | `.cpython-312-x86_64-linux-gnu.so` |
 | `JUST_BUILDIT_LDFLAGS` | `-shared -fPIC` (Linux) / `-dynamiclib -undefined dynamic_lookup` (macOS) |
 | `JUST_BUILDIT_LIBS` | `` (Linux/macOS) / `-L/ucrt64/lib -lpython3.14` (Windows/MinGW) |

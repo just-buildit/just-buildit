@@ -1,5 +1,5 @@
 /*
- * add.c — just-build Meson example.
+ * add.c — just-buildit Meson example.
  *
  * Exports: add.add(a, b) -> int
  */

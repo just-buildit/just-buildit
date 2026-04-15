@@ -121,12 +121,12 @@ def _default_build(
             "-o", str(output),
             *_python_link_flags(),
         ]
-        print(f"just-build: default build: {shlex.join(cmd)}", flush=True)
+        print(f"just-buildit: default build: {shlex.join(cmd)}", flush=True)
         result = subprocess.run(cmd, cwd=str(project_root))
         if result.returncode != 0:
             raise RuntimeError(f"Default build failed with exit code {result.returncode}")
     else:
-        print(f"just-build: no .c files in src/{package}/ — pure Python package", flush=True)
+        print(f"just-buildit: no .c files in src/{package}/ — pure Python package", flush=True)
 
     # Copy all non-source files (Python sources, data, etc.) preserving tree structure.
     # .c and .h stay in the source tree — they have no place in a wheel.
@@ -188,7 +188,7 @@ def run_build(
             "JUST_BUILDIT_LIBS":    " ".join(_python_link_flags()),
         })
 
-        print(f"just-build: running build command: {command}", flush=True)
+        print(f"just-buildit: running build command: {command}", flush=True)
         print(f"  JUST_BUILDIT_NAME        = {name}", flush=True)
         print(f"  JUST_BUILDIT_PYTHON      = {sys.executable}", flush=True)
         print(f"  JUST_BUILDIT_INCLUDE_DIR = {include_dir}", flush=True)
@@ -238,7 +238,7 @@ def run_repair(
         repair_command = _auto_repair_command()
         if repair_command is None:
             print(
-                "just-build: no repair command detected for this platform, skipping repair.",
+                "just-buildit: no repair command detected for this platform, skipping repair.",
                 flush=True,
             )
             return wheel_path

@@ -95,7 +95,7 @@ def _metadata_bytes(
 def _wheel_meta_bytes(py_tag: str, abi_tag: str, plat_tag: str, pure: bool = False) -> bytes:
     return (
         f"Wheel-Version: 1.0\n"
-        f"Generator: just-build\n"
+        f"Generator: just-buildit\n"
         f"Root-Is-Purelib: {'true' if pure else 'false'}\n"
         f"Tag: {py_tag}-{abi_tag}-{plat_tag}\n"
     ).encode()
@@ -207,5 +207,5 @@ def build_wheel(
         zf.writestr(f"{dist_info}/WHEEL", wheel_meta)
         zf.writestr(record_arcname, record_data)
 
-    print(f"just-build: wrote raw wheel -> {wheel_path}", flush=True)
+    print(f"just-buildit: wrote raw wheel -> {wheel_path}", flush=True)
     return wheel_path

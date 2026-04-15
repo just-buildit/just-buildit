@@ -58,7 +58,7 @@ def build_editable(
 
     # Fast path: write a .pth file pointing at the source tree.
     # No build command is run; the C extension must already be compiled in place.
-    with tempfile.TemporaryDirectory(prefix="just-build-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="just-buildit-") as tmp:
         output_dir = Path(tmp) / "output"
         output_dir.mkdir()
 
@@ -91,7 +91,7 @@ def build_wheel(
 
     config = _meta.load(project_root)
 
-    with tempfile.TemporaryDirectory(prefix="just-build-") as tmp:
+    with tempfile.TemporaryDirectory(prefix="just-buildit-") as tmp:
         output_dir = Path(tmp) / "output"
 
         # Step 1: build → output_dir (the wheel content root)

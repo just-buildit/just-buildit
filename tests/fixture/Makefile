@@ -1,9 +1,9 @@
-# Makefile for just-build test fixture.
+# Makefile for just-buildit test fixture.
 #
-# just-build sets these env vars before calling make:
+# just-buildit sets these env vars before calling make:
 #   JUST_BUILDIT_NAME          = hello
 #   JUST_BUILDIT_INCLUDE_DIR   = /path/to/python/include
-#   JUST_BUILDIT_OUTPUT_DIR    = /tmp/just-build-xyz/output
+#   JUST_BUILDIT_OUTPUT_DIR    = /tmp/just-buildit-xyz/output
 #   JUST_BUILDIT_EXT_SUFFIX    = .cpython-312-x86_64-linux-gnu.so
 
 CC      ?= cc

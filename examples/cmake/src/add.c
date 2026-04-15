@@ -1,5 +1,5 @@
 /*
- * add.c — just-build CMake example.
+ * add.c — just-buildit CMake example.
  *
  * Exports: add.add(a, b) -> int
  */
