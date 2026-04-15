@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.1] — 2026-04-15
+
+### Breaking
+
+- Renamed config section from `[tool.just-build]` to `[tool.just-buildit]`
+
+---
+
 ## [0.2.0] — 2026-04-15
 
 ### Breaking
@@ -9,11 +17,6 @@
   [build-system]
   requires = ["just-buildit"]
   build-backend = "just_buildit"   # was: just_build
-  ```
-- Renamed config section from `[tool.just-build]` to `[tool.just-buildit]`. Update your `pyproject.toml`:
-  ```toml
-  [tool.just-buildit]   # was: [tool.just-build]
-  command = "make"
   ```
 - Renamed all environment variables from `JUST_BUILD_*` to `JUST_BUILDIT_*`. Update your Makefiles and build scripts:
   - `JUST_BUILD_NAME` → `JUST_BUILDIT_NAME`
