@@ -7,7 +7,7 @@
 site_name        = "just-build"
 site_description = "The missing PEP 517 build backend for C extensions."
 site_url         = "https://just-buildit.github.io/just-build/"
-repo_url         = "https://github.com/just-buildit/just-build"
+repo_url         = "https://github.com/just-buildit/just-buildit"
 copyright        = "Copyright &copy; 2026 just-build contributors — MIT License"
 
 nav = [
@@ -65,7 +65,7 @@ toggle.name = "Switch to dark mode"
 # ----------------------------------------------------------------------------
 [[project.extra.social]]
 icon = "fontawesome/brands/github"
-link = "https://github.com/just-buildit/just-build"
+link = "https://github.com/just-buildit/just-buildit"
 
 [[project.extra.social]]
 icon = "fontawesome/brands/python"
