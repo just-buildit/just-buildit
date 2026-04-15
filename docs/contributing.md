@@ -33,7 +33,7 @@ bootstrap, or simply testing a local change — add the source directly to your
 path:
 
 ```sh
-git clone https://github.com/just-buildit/just-build.git
+git clone https://github.com/just-buildit/just-buildit.git
 export PYTHONPATH=/path/to/just-build/src:$PYTHONPATH
 ```
 

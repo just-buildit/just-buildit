@@ -20,9 +20,9 @@ dev = [
 ]
 
 [project.scripts]
-just-buildit = "just_build._cli:main"
+just-buildit = "just_buildit._cli:main"
 
 [project.urls]
-Homepage = "https://github.com/just-buildit/just-build"
-Repository = "https://github.com/just-buildit/just-build"
-"Bug Tracker" = "https://github.com/just-buildit/just-build/issues"
+Homepage = "https://github.com/just-buildit/just-buildit"
+Repository = "https://github.com/just-buildit/just-buildit"
+"Bug Tracker" = "https://github.com/just-buildit/just-buildit/issues"
