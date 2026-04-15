@@ -4,11 +4,11 @@
 # ============================================================================
 
 [project]
-site_name        = "just-build"
+site_name        = "just-buildit"
 site_description = "The missing PEP 517 build backend for C extensions."
-site_url         = "https://just-buildit.github.io/just-build/"
+site_url         = "https://just-buildit.github.io/just-buildit/"
 repo_url         = "https://github.com/just-buildit/just-buildit"
-copyright        = "Copyright &copy; 2026 just-build contributors — MIT License"
+copyright        = "Copyright &copy; 2026 just-buildit contributors — MIT License"
 
 nav = [
   { "Home"                  = "index.md"                   },
