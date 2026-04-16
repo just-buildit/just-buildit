@@ -92,6 +92,13 @@ def _metadata_bytes(
     return "\n".join(lines).encode()
 
 
+def _entry_points_bytes(scripts: dict[str, str]) -> bytes:
+    """Return entry_points.txt content for the given console_scripts mapping."""
+    lines = ["[console_scripts]"]
+    lines += [f"{name} = {ref}" for name, ref in sorted(scripts.items())]
+    return ("\n".join(lines) + "\n").encode()
+
+
 def _wheel_meta_bytes(py_tag: str, abi_tag: str, plat_tag: str, pure: bool = False) -> bytes:
     return (
         f"Wheel-Version: 1.0\n"
@@ -110,6 +117,7 @@ def _write_dist_info(
     readme_text: str | None = None,
     readme_content_type: str | None = None,
     requires_python: str | None = None,
+    scripts: dict[str, str] | None = None,
 ) -> Path:
     """Write a .dist-info directory for prepare_metadata_for_build_wheel."""
     norm_name = _normalize_name(name)
@@ -126,6 +134,8 @@ def _write_dist_info(
     (dist_info / "WHEEL").write_bytes(
         _wheel_meta_bytes(_python_tag(), _abi_tag(), _platform_tag())
     )
+    if scripts:
+        (dist_info / "entry_points.txt").write_bytes(_entry_points_bytes(scripts))
     return dist_info
 
 
@@ -140,6 +150,7 @@ def build_wheel(
     readme_text: str | None = None,
     readme_content_type: str | None = None,
     requires_python: str | None = None,
+    scripts: dict[str, str] | None = None,
 ) -> Path:
     """
     Package everything in output_dir into a wheel and write it to wheel_dir.
@@ -178,6 +189,7 @@ def build_wheel(
         requires_python=requires_python,
     )
     wheel_meta = _wheel_meta_bytes(py_tag, abi_tag, plat_tag, pure=pure)
+    entry_points = _entry_points_bytes(scripts) if scripts else None
 
     record_entries: list[tuple[str, str, int]] = []
 
@@ -188,6 +200,8 @@ def build_wheel(
         add(str(path.relative_to(output_dir)), path.read_bytes())
     add(f"{dist_info}/METADATA", metadata)
     add(f"{dist_info}/WHEEL", wheel_meta)
+    if entry_points:
+        add(f"{dist_info}/entry_points.txt", entry_points)
     # RECORD itself has an empty hash entry per spec
     record_arcname = f"{dist_info}/RECORD"
 
@@ -205,6 +219,8 @@ def build_wheel(
             zf.writestr(str(path.relative_to(output_dir)), path.read_bytes())
         zf.writestr(f"{dist_info}/METADATA", metadata)
         zf.writestr(f"{dist_info}/WHEEL", wheel_meta)
+        if entry_points:
+            zf.writestr(f"{dist_info}/entry_points.txt", entry_points)
         zf.writestr(record_arcname, record_data)
 
     print(f"just-buildit: wrote raw wheel -> {wheel_path}", flush=True)

@@ -32,6 +32,7 @@ class BuildConfig:
     package: str | None = None           # package dir name; defaults to normalized project name
     exclude: list[str] = field(default_factory=list)
     editable_path: str | None = None     # src root for .pth-file editable installs
+    scripts: dict[str, str] = field(default_factory=dict)  # project.scripts → entry_points.txt
     summary: str | None = None
     readme_text: str | None = None
     readme_content_type: str | None = None
@@ -81,6 +82,7 @@ def load(project_root: Path) -> BuildConfig:
     command = jb.get("command") or None        # None → zero-config src/{package}/ default
     package = jb.get("package") or None        # override package dir name for src/ lookup
     editable_path = jb.get("editable_path") or None  # src root for .pth editable installs
+    scripts = project.get("scripts", {})
     exclude = jb.get("exclude", [])
 
     raw_repair = jb.get("repair", _MISSING)
@@ -104,6 +106,7 @@ def load(project_root: Path) -> BuildConfig:
         package=package,
         exclude=exclude,
         editable_path=editable_path,
+        scripts=scripts,
         summary=project.get("description") or None,
         readme_text=readme_text,
         readme_content_type=readme_content_type,

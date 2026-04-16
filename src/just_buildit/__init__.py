@@ -12,7 +12,7 @@ Public surface (PEP 517):
 
 from __future__ import annotations
 
-__version__ = "0.2.4"
+__version__ = "0.2.5"
 
 import tempfile
 from pathlib import Path
@@ -39,6 +39,7 @@ def prepare_metadata_for_build_wheel(
         readme_text=config.readme_text,
         readme_content_type=config.readme_content_type,
         requires_python=config.requires_python,
+        scripts=config.scripts or None,
     )
     return dist_info.name
 
@@ -81,6 +82,7 @@ def build_editable(
             readme_text=config.readme_text,
             readme_content_type=config.readme_content_type,
             requires_python=config.requires_python,
+            scripts=config.scripts or None,
         )
 
     return wheel_path.name
@@ -120,6 +122,7 @@ def build_wheel(
             readme_text=config.readme_text,
             readme_content_type=config.readme_content_type,
             requires_python=config.requires_python,
+            scripts=config.scripts or None,
         )
 
         # Step 3: repair (auditwheel / delocate / delvewheel)
