@@ -67,10 +67,10 @@ uvx just-buildit sdist     # build source distribution into dist/
 
 | | |
 |---|---|
-| [Environment variables](docs/environment-variables.md) | What just-buildit sets before calling your command |
-| [Examples](docs/examples.md) | Make, CMake, Meson, Bazel, mixed Python + C, nested packages |
-| [Configuration](docs/configuration.md) | Full config reference, wheel repair, editable installs |
-| [Contributing](docs/contributing.md) | Running tests, platform support, bootstrapping |
+| [Environment variables](https://just-buildit.github.io/just-buildit/environment-variables/) | What just-buildit sets before calling your command |
+| [Examples](https://just-buildit.github.io/just-buildit/examples/) | Make, CMake, Meson, Bazel, mixed Python + C, nested packages |
+| [Configuration](https://just-buildit.github.io/just-buildit/configuration/) | Full config reference, wheel repair, editable installs |
+| [Contributing](https://just-buildit.github.io/just-buildit/contributing/) | Running tests, platform support, bootstrapping |
 
 ---
 
