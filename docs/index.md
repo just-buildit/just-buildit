@@ -19,6 +19,14 @@ just-buildit is that option.
 
 ---
 
+## Installation
+
+```sh
+pip install just-buildit
+```
+
+---
+
 ## Quickstart
 
 Flat layouts, nested packages, multiple extensions across subdirectories, mixed pure Python and C — whatever your build produces.
