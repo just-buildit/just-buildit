@@ -3,13 +3,14 @@
 ## Running the tests
 
 ```sh
-python -m unittest tests.test_build tests.test_examples -v
+python -m unittest tests.test_build tests.test_examples tests.test_cli -v
 ```
 
 No dependencies required. `tests.test_build` builds real C extensions, verifies
 wheel structure, and confirms correct results. `tests.test_examples` builds each
-example in `examples/` end-to-end; CMake and Meson tests skip gracefully if
-those tools are not installed.
+example in `examples/` end-to-end; CMake, Meson, and Bazel tests skip gracefully
+if those tools are not installed. `tests.test_cli` exercises the CLI via
+subprocess.
 
 ---
 
@@ -50,3 +51,14 @@ uv build --no-build-isolation
 
 No build step, no compiler, no install required. `src/just_buildit/` is
 importable as-is.
+
+---
+
+## Releasing
+
+- [ ] All CI checks green on `main`
+- [ ] `CHANGELOG.md` updated with release date and notes
+- [ ] Version bumped in `pyproject.toml`
+- [ ] Commit: `chore: bump version to X.Y.Z`
+- [ ] Tag: `git tag vX.Y.Z && git push origin vX.Y.Z`
+- [ ] Confirm the release workflow passes and the wheel lands on PyPI

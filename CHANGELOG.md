@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.3.0] — 2026-04-30
+
+### Added
+
+- Bazel example (`examples/bazel/`) — `genrule`-based build with a `build_ext.py` bridge script forwarding just-buildit env vars via `--action_env`
+- Nested package example (`examples/nested/`) — recursive package tree with multiple extensions across subdirectories
+- CLI integration tests (`tests/test_cli.py`) — 15 tests covering `inspect`, `build`, `sdist`, `help`, and error handling via subprocess
+- CI: dedicated `test-bazel` job running the Bazel example across all Python versions
+
+### Docs
+
+- Env variable table split into platform-neutral and platform-specific sections
+- Examples page updated with Bazel and recursive package tree sections
+- Quickstart updated to call out flat, nested, multi-extension, and mixed layouts
+- PyPI doc links updated to point to GitHub Pages
+
+---
+
 ## [0.2.1] — 2026-04-15
 
 ### Breaking
