@@ -26,7 +26,9 @@ just-buildit is that option.
 
 ## Quickstart
 
-Got a single C extension in `src/mylib/`? No configuration needed:
+Flat layouts, nested packages, multiple extensions across subdirectories, mixed pure Python and C — whatever your build produces.
+
+**Zero config** — a single C extension in `src/mylib/`:
 
 ```toml
 [build-system]
@@ -41,15 +43,15 @@ version = "0.1.0"
 Run `pip install .` and just-buildit finds `src/mylib/`, compiles every `.c`
 file it contains, and ships the result.
 
-For anything more complex, point it at your build command:
+**Custom build command** — Make, CMake, Meson, Bazel, or anything else:
 
 ```toml
 [tool.just-buildit]
 command = "make"
 ```
 
-just-buildit sets environment variables, calls your command, packages everything
-written to `$JUST_BUILDIT_OUTPUT_DIR`, and ships the result.
+just-buildit sets environment variables, calls your command, and packages
+everything written to `$JUST_BUILDIT_OUTPUT_DIR`.
 
 ### CLI
 
@@ -66,7 +68,7 @@ uvx just-buildit sdist     # build source distribution into dist/
 | | |
 |---|---|
 | [Environment variables](docs/environment-variables.md) | What just-buildit sets before calling your command |
-| [Examples](docs/examples.md) | Makefile, CMake, Meson, mixed Python + C |
+| [Examples](docs/examples.md) | Make, CMake, Meson, Bazel, mixed Python + C, nested packages |
 | [Configuration](docs/configuration.md) | Full config reference, wheel repair, editable installs |
 | [Contributing](docs/contributing.md) | Running tests, platform support, bootstrapping |
 

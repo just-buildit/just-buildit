@@ -1,0 +1,13 @@
+[build-system]
+requires = ["just-buildit"]
+build-backend = "just_buildit"
+
+[project]
+name = "greeter"
+version = "0.1.0"
+description = "just-buildit Bazel example."
+requires-python = ">=3.11"
+
+[tool.just-buildit]
+command = "python build_ext.py"
+repair = false

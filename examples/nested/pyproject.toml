@@ -1,0 +1,13 @@
+[build-system]
+requires = ["just-buildit"]
+build-backend = "just_buildit"
+
+[project]
+name = "imagelib"
+version = "0.1.0"
+description = "just-buildit nested recursive package example."
+requires-python = ">=3.11"
+
+[tool.just-buildit]
+command = "make"
+repair = false

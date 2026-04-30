@@ -1,0 +1,12 @@
+genrule(
+    name = "greeter_so",
+    srcs = ["src/greeter.c"],
+    outs = ["greeter.so"],
+    cmd = """
+        $$CC $$JUST_BUILDIT_LDFLAGS \
+            -I$$JUST_BUILDIT_INCLUDE_DIR \
+            $(location src/greeter.c) \
+            -o $@ \
+            $$JUST_BUILDIT_LIBS
+    """,
+)

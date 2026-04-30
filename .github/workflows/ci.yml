@@ -19,6 +19,19 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - run: uv run --no-project python -m unittest tests.test_build tests.test_examples -v
 
+  test-bazel:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - uses: bazelbuild/setup-bazel@v0
+      - run: uv run --no-project python -m unittest tests.test_examples.TestBazelExample -v
+
   test-windows-ucrt64:
     runs-on: windows-latest
     steps:

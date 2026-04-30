@@ -194,5 +194,85 @@ class TestMixedExample(unittest.TestCase):
         self.assertEqual(result, (5, 0))
 
 
+class TestBazelExample(unittest.TestCase):
+    """examples/bazel/ — Bazel genrule build."""
+
+    @classmethod
+    def setUpClass(cls):
+        if not shutil.which("bazel"):
+            raise unittest.SkipTest("bazel not found")
+        cls._tmp = tempfile.mkdtemp(prefix="jb-bazel-")
+        cls._wheel_dir = Path(cls._tmp) / "dist"
+        cls._wheel_dir.mkdir()
+        cls._wheel_name = _build_example(EXAMPLES / "bazel", cls._wheel_dir)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls._tmp, ignore_errors=True)
+
+    def test_produces_whl_file(self):
+        self.assertTrue((self._wheel_dir / self._wheel_name).exists())
+
+    def test_wheel_is_valid_zip(self):
+        self.assertTrue(zipfile.is_zipfile(self._wheel_dir / self._wheel_name))
+
+    def test_wheel_contains_extension(self):
+        with zipfile.ZipFile(self._wheel_dir / self._wheel_name) as zf:
+            names = zf.namelist()
+        self.assertTrue(any(n.endswith((".so", ".pyd")) for n in names))
+
+    def test_greet(self):
+        mod = _unpack_and_import(self._wheel_dir, self._wheel_name, "greeter")
+        self.assertEqual(mod.greet("world"), "Hello, world!")
+        self.assertEqual(mod.greet("Python"), "Hello, Python!")
+
+
+class TestNestedExample(unittest.TestCase):
+    """examples/nested/ — recursive package tree with extensions in subdirectories."""
+
+    @classmethod
+    def setUpClass(cls):
+        if not shutil.which("make"):
+            raise unittest.SkipTest("make not found")
+        if not shutil.which("cc") and not shutil.which("gcc") and not shutil.which("clang"):
+            raise unittest.SkipTest("no C compiler found")
+        cls._tmp = tempfile.mkdtemp(prefix="jb-nested-")
+        cls._wheel_dir = Path(cls._tmp) / "dist"
+        cls._wheel_dir.mkdir()
+        cls._wheel_name = _build_example(EXAMPLES / "nested", cls._wheel_dir)
+
+    @classmethod
+    def tearDownClass(cls):
+        shutil.rmtree(cls._tmp, ignore_errors=True)
+
+    def test_produces_whl_file(self):
+        self.assertTrue((self._wheel_dir / self._wheel_name).exists())
+
+    def test_wheel_is_valid_zip(self):
+        self.assertTrue(zipfile.is_zipfile(self._wheel_dir / self._wheel_name))
+
+    def test_wheel_contains_nested_extensions(self):
+        with zipfile.ZipFile(self._wheel_dir / self._wheel_name) as zf:
+            names = zf.namelist()
+        exts = [n for n in names if n.endswith((".so", ".pyd"))]
+        self.assertEqual(len(exts), 2)
+        self.assertTrue(any("filters" in n for n in exts))
+        self.assertTrue(any("codec" in n for n in exts))
+
+    def test_wheel_contains_python_sources(self):
+        with zipfile.ZipFile(self._wheel_dir / self._wheel_name) as zf:
+            names = zf.namelist()
+        self.assertTrue(any(n == "imagelib/__init__.py" for n in names))
+        self.assertTrue(any(n == "imagelib/filters/__init__.py" for n in names))
+        self.assertTrue(any(n == "imagelib/codec/__init__.py" for n in names))
+
+    def test_blur_and_encode(self):
+        mod = _unpack_and_import(self._wheel_dir, self._wheel_name, "imagelib")
+        self.assertEqual(mod.blur(100), 50)
+        self.assertEqual(mod.blur(7), 3)
+        self.assertEqual(mod.encode(10), 30)
+        self.assertEqual(mod.encode(0), 0)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
