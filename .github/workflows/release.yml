@@ -35,8 +35,21 @@ jobs:
       - shell: msys2 {0}
         run: python -m unittest tests.test_build tests.test_examples -v
 
+  test-bazel:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: sudo apt-get install -y bazel-bootstrap && sudo ln -sf /usr/bin/bazel-bootstrap /usr/local/bin/bazel
+      - run: uv run --no-project python -m unittest tests.test_examples.TestBazelExample -v
+
   build:
-    needs: [test, test-windows-ucrt64]
+    needs: [test, test-bazel, test-windows-ucrt64]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
