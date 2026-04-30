@@ -62,3 +62,4 @@ importable as-is.
 - [ ] Commit: `chore: bump version to X.Y.Z`
 - [ ] Tag: `git tag vX.Y.Z && git push origin vX.Y.Z`
 - [ ] Confirm the release workflow passes and the wheel lands on PyPI
+- [ ] Run post-release smoke test: `python -m unittest tests.test_pypi -v`
