@@ -1,5 +1,48 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+
+- **`dynamic = ["version"]` is honoured, so the version can be derived at
+    build time (#28).** `dynamic` was consulted nowhere in `_meta`, so
+    `[project] version` had to be a literal -- a tracked file every commit has
+    to edit. That is not cosmetic: a package index refuses a duplicate
+    filename, so a re-used version is a rejected upload, which means every PR
+    must bump it and any two open PRs conflict on every file carrying a copy
+    whatever they actually changed.
+
+    Declare a source with `[tool.just-buildit] version-from = "vcs"`. It
+    resolves a sibling `PKG-INFO` first, then `git describe`: on tag `v1.1.3`
+    gives `1.1.3`, five commits past it gives `1.1.3.dev5`, and an unpacked
+    sdist with no `.git` gives whatever its `PKG-INFO` records. `PKG-INFO`
+    first is what closes the round trip -- an sdist built from a checkout
+    carries a concrete number, so the wheel built from that sdist agrees with
+    it without needing a repository that is no longer there, and an sdist
+    unpacked inside an unrelated checkout cannot take that checkout's tags.
+
+    Four refusals, all PEP 621's rather than house style: `name` in `dynamic`,
+    `version` given both statically and dynamically, a `dynamic` that is not a
+    list, and a field listed in `dynamic` that cannot be determined. That last
+    one is deliberately an error rather than a `0.0.0` placeholder, which
+    would upload a wrong version instead of failing the build. A project that
+    says nothing about `dynamic` behaves exactly as before.
+
+    Note that `.devN` sorts *before* the tag it follows under PEP 440, so
+    publishing dev builds beside their release makes them unreachable; #29
+    tracks offering the bump-the-patch alternative.
+
+### CI
+
+- **`make test` discovers test modules from the tree instead of a
+    hand-maintained list.** `_TEST_MODULES` named each module explicitly --
+    the same second copy the comment above it warns about -- so a new
+    `tests/test_*.py` was run by neither `make test` nor CI, and nothing said
+    so. #28's tests sat unrun that way until the target was compared against
+    `ls tests/`. The only way to keep a file out is now to name it in
+    `_TEST_EXCLUDE`; `test_pypi` is the one, because it exercises the
+    published package and so tests the last release rather than the branch.
+
 ## [0.3.12] — 2026-09-02
 
 ### Fixed
