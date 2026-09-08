@@ -35,6 +35,13 @@
     briefly read `1.1.3.dev5` on the branch, which inverted the meaning of the
     `.dev` segment; it never reached a release).
 
+    Pre-release phases are reached by **tagging** them: `v1.1.3a1` derives
+    `1.1.3a1`, and commits past it derive `1.1.3a2.dev3`. A tag already
+    carrying a `.dev` segment, or a local `+` segment, is refused by name --
+    the first would produce a version with two `.dev` segments (not valid PEP
+    440), and the second would bury the commit distance in the local part,
+    where it orders nothing and PyPI will not accept it.
+
 ### CI
 
 - **`make test` discovers test modules from the tree instead of a

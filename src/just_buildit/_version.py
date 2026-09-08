@@ -130,6 +130,27 @@ def _git(project_root: Path, *args: str) -> str | None:
 _LAST_NUMBER_RE = re.compile(r"(?P<num>\d+)(?P<rest>\D*)$")
 
 
+#: A tag that cannot be the BASE of a derived version, because appending a
+#: `.devN` to it does not produce a well-formed one.
+#:
+#: Two shapes, both found by probing the alpha path rather than by reading the
+#: code:
+#:
+#: - it already carries a ``.dev``. `v1.1.3.dev5` + 2 commits gave
+#:   ``1.1.3.dev6.dev2``, which is not a PEP 440 version at all -- the failure
+#:   would surface later, as a rejected upload or an unparseable requirement.
+#: - it carries a local segment (``+``). `v1.1.3+local` gave
+#:   ``1.1.4+local.dev3``, which *is* well-formed and is worse for it: the
+#:   distance lands inside the LOCAL part, so every build past the tag compares
+#:   equal on its public version and nothing can order them. PyPI refuses local
+#:   versions outright.
+#:
+#: Neither is a release tag, so refusing is honest rather than restrictive --
+#: and it is what PEP 621 asks for, the module docstring's "erroring rather
+#: than guessing" applied to the tag instead of to its absence.
+_UNBUMPABLE_RE = re.compile(r"(?i)(?:[-_.]?dev\d*|\+)")
+
+
 def _bump_last_number(base: str) -> str | None:
     """Increment the trailing number of a version, naming the NEXT release.
 
@@ -153,6 +174,8 @@ def _bump_last_number(base: str) -> str | None:
     None when the tag carries no digits at all, which the ``v[0-9]*`` match
     glob already prevents; the caller reads that as "no answer from git".
     """
+    if _UNBUMPABLE_RE.search(base):
+        return None
     match = _LAST_NUMBER_RE.search(base)
     if match is None:
         return None
@@ -188,7 +211,20 @@ def _from_git(project_root: Path) -> str | None:
     # the build below the tag it came after. See `_bump_last_number`.
     upcoming = _bump_last_number(base)
     if upcoming is None:
-        return None
+        # Raised, not returned as None. None here means "git had no answer",
+        # and the caller turns that into a message about a missing tag -- which
+        # would send someone hunting for the tag they are looking straight at.
+        raise VersionError(
+            f"the nearest tag is {tag!r}, which cannot be the base of a "
+            "derived version.\n"
+            "A tag carrying a '.dev' segment would give a version with two of "
+            "them (not a valid PEP 440 version), and one carrying a local "
+            "'+' segment would put the commit distance inside the local part, "
+            "where it cannot order anything and where PyPI will not accept "
+            "it.\n"
+            "Tag a release instead -- 'v1.2.3', or a pre-release such as "
+            "'v1.2.3a1' / 'v1.2.3rc1', all of which derive correctly."
+        )
     return f"{upcoming}.dev{distance}"
 
 

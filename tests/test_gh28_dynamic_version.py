@@ -242,6 +242,111 @@ class TestOrdering(unittest.TestCase):
         self.assertLess(Version(self._derived(1)), Version(self._derived(5)))
 
 
+class TestPreReleaseProgression(unittest.TestCase):
+    """How a project reaches `1.1.3a1` at all: it TAGS it.
+
+    The scheme derives, it never invents a pre-release phase -- deciding "this
+    is now an alpha" is a human act, and the tag is where it is declared.
+    Everything after follows, and the whole progression has to stay ordered.
+    """
+
+    def _at(self, tag: str, commits: int) -> str:
+        with TemporaryDirectory(prefix="jb28-") as tmp:
+            root = _repo(Path(tmp))
+            _git(root, "tag", "-d", "v1.1.3")
+            _git(root, "tag", tag)
+            for i in range(commits):
+                (root / "src" / "jbdyn" / "__init__.py").write_text(
+                    "x" * (i + 1)
+                )
+                _git(root, "add", "-A")
+                _git(root, "commit", "-qm", f"c{i}")
+            return _meta.load(root).version
+
+    def test_an_alpha_tag_is_taken_verbatim(self) -> None:
+        self.assertEqual(self._at("v1.1.3a1", 0), "1.1.3a1")
+
+    def test_past_an_alpha_bumps_the_alpha(self) -> None:
+        self.assertEqual(self._at("v1.1.3a1", 3), "1.1.3a2.dev3")
+
+    def test_the_alpha_number_is_bumped_numerically(self) -> None:
+        """`a9` -> `a10`, not a lexical successor."""
+        self.assertEqual(self._at("v1.1.3a9", 2), "1.1.3a10.dev2")
+
+    def test_beta_and_post_behave_the_same_way(self) -> None:
+        self.assertEqual(self._at("v1.1.3b1", 3), "1.1.3b2.dev3")
+        self.assertEqual(self._at("v1.1.3.post1", 3), "1.1.3.post2.dev3")
+
+    def test_the_whole_progression_is_strictly_increasing(self) -> None:
+        """The property that matters, judged by `packaging`, over the versions
+        this code actually emits -- approaching 1.1.3 from the previous
+        release, through an alpha and a release candidate, to 1.1.3 itself."""
+        from packaging.version import Version
+
+        chain = [
+            self._at("v1.1.2", 5),  # 1.1.3.dev5 -- before any alpha
+            self._at("v1.1.3a1", 0),
+            self._at("v1.1.3a1", 3),
+            self._at("v1.1.3a2", 0),
+            self._at("v1.1.3rc1", 0),
+            self._at("v1.1.3rc1", 3),
+            self._at("v1.1.3rc2", 0),
+            self._at("v1.1.3", 0),
+        ]
+        for earlier, later in zip(chain, chain[1:]):
+            self.assertLess(
+                Version(earlier), Version(later), f"{earlier} !< {later}"
+            )
+
+    def test_every_derived_version_is_valid_pep440(self) -> None:
+        """`v1.1.3.dev5` + 2 commits produced `1.1.3.dev6.dev2`, which is not a
+        version at all -- it would have failed later, at upload or at
+        resolution, far from the tag that caused it."""
+        from packaging.version import Version
+
+        for tag, commits in [
+            ("v1.1.3", 5),
+            ("v1.1.3a1", 3),
+            ("v1.1.3a9", 2),
+            ("v1.1.3b1", 3),
+            ("v1.1.3rc1", 3),
+            ("v1.1.3.post1", 3),
+            ("v1!2.3", 3),
+        ]:
+            with self.subTest(tag=tag, commits=commits):
+                Version(self._at(tag, commits))  # raises if malformed
+
+
+class TestUnbumpableTags(unittest.TestCase):
+    """A tag that cannot be the base of a derived version is refused, and the
+    refusal names it -- the generic "no matching tag yet" message would send
+    someone hunting for the tag they are looking straight at."""
+
+    def _resolve(self, tag: str) -> str:
+        with TemporaryDirectory(prefix="jb28-") as tmp:
+            root = _repo(Path(tmp))
+            _git(root, "tag", "-d", "v1.1.3")
+            _git(root, "tag", tag)
+            (root / "src" / "jbdyn" / "__init__.py").write_text("x")
+            _git(root, "add", "-A")
+            _git(root, "commit", "-qm", "past")
+            with self.assertRaises(_version.VersionError) as ctx:
+                _meta.load(root)
+            return str(ctx.exception)
+
+    def test_a_dev_tag_is_refused(self) -> None:
+        message = self._resolve("v1.1.3.dev5")
+        self.assertIn("v1.1.3.dev5", message)
+        self.assertIn("cannot be the base", message)
+
+    def test_a_local_version_tag_is_refused(self) -> None:
+        self.assertIn("cannot be the base", self._resolve("v1.1.3+local"))
+
+    def test_the_refusal_does_not_blame_a_missing_tag(self) -> None:
+        """The specific message, not the generic one."""
+        self.assertNotIn("no matching tag yet", self._resolve("v1.1.3.dev5"))
+
+
 class TestRefusals(unittest.TestCase):
     def test_static_and_dynamic_together_is_refused(self) -> None:
         toml = DYNAMIC.replace(

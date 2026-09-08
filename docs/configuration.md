@@ -82,6 +82,45 @@ that sdist agrees with it without needing a repository that is no longer there.
 It also stops an sdist unpacked inside an unrelated checkout from picking up
 that checkout's tags.
 
+### Reaching an alpha, beta or release candidate
+
+You **tag** it. The scheme derives; it never invents a pre-release phase,
+because deciding "this is now an alpha" is a judgement no tool should make for
+you. The tag is where that judgement is recorded, and everything after it
+follows automatically:
+
+```bash
+git tag v1.1.3a1        # you decide this is the first alpha
+```
+
+| git state                 | version         |
+| ------------------------- | --------------- |
+| after `v1.1.2`, 5 commits | `1.1.3.dev5`    |
+| on `v1.1.3a1`             | `1.1.3a1`       |
+| 3 commits past it         | `1.1.3a2.dev3`  |
+| on `v1.1.3rc1`            | `1.1.3rc1`      |
+| 3 commits past it         | `1.1.3rc2.dev3` |
+| on `v1.1.3`               | `1.1.3`         |
+
+Those are strictly increasing under PEP 440, in that order. `b1`, `.post1` and
+an epoch (`v1!2.3`) all behave the same way, and the number is bumped
+numerically, so `a9` becomes `a10` rather than a lexical successor.
+
+### Tags that cannot be a base
+
+Two tag shapes are refused rather than derived from, because appending a commit
+distance to them does not produce a usable version:
+
+- **one already carrying `.dev`** — `v1.1.3.dev5` would give
+    `1.1.3.dev6.dev2`, which is not a valid PEP 440 version at all.
+- **one carrying a local `+` segment** — `v1.1.3+local` would give
+    `1.1.4+local.dev3`, which *is* well-formed and is worse for it: the
+    distance lands inside the local part, so every build past the tag compares
+    equal on its public version, and PyPI refuses local versions outright.
+
+Neither is a release tag, and the error names the offending tag rather than
+reporting a missing one.
+
 ### When it cannot be determined
 
 PEP 621 requires a back-end to raise an error if a field is listed in `dynamic`
