@@ -55,10 +55,21 @@ TEST_PYTHON ?=
 _TEST_RUN     = $(UV) run --no-project \
                     $(if $(TEST_PYTHON),-p $(TEST_PYTHON),) \
                     --with pip --with numpy python
-_TEST_MODULES = tests.test_build tests.test_examples \
-                tests.test_examples_target_interpreter \
-                tests.test_cli tests.test_metadata \
-                tests.test_sdist_excludes
+# Registration-free, and deliberately so. This was a hand-maintained list of
+# module names, which is the same second copy the comment above is about: a new
+# `tests/test_*.py` was simply never run, in `make test` or in CI, and nothing
+# said so. gh-28's tests sat unrun that way until `make test` was compared
+# against `ls tests/`.
+#
+# So the list is derived from the tree, and the only way to keep a file out is
+# to name it here. `test_pypi` is the one: it installs the PUBLISHED package
+# from PyPI and exercises that, so running it from a branch tests the last
+# release rather than the change in hand. Run it directly when you want it --
+# `python -m unittest tests.test_pypi -v`, as its docstring says.
+_TEST_EXCLUDE = test_pypi
+_TEST_FILES   = $(filter-out $(addprefix tests/,$(addsuffix .py,$(_TEST_EXCLUDE))),\
+                    $(wildcard tests/test_*.py))
+_TEST_MODULES = $(subst /,.,$(basename $(_TEST_FILES)))
 TEST_CMD      = $(_TEST_RUN) -m unittest $(_TEST_MODULES) -v
 TEST_FAST_CMD = $(_TEST_RUN) -m unittest --failfast $(_TEST_MODULES)
 
