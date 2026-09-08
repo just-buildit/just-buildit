@@ -36,7 +36,13 @@
     `.dev` segment; it never reached a release).
 
     Pre-release phases are reached by **tagging** them: `v1.1.3a1` derives
-    `1.1.3a1`, and commits past it derive `1.1.3a2.dev3`. A tag already
+    `1.1.3a1`, and commits past it derive `1.1.3a2.dev3`. Tags are parsed with
+    PEP 440's own grammar rather than string-edited, so every spelling the
+    spec makes equivalent (`alpha`/`beta`/`c`/`pre`/`preview`, `rev`/`r`, the
+    bare `-N` post shorthand, `.`/`-`/`_` separators, any case, an omitted
+    numeral meaning 0) gives the same version -- and what is emitted is always
+    the canonical form, since it becomes a wheel filename and a requirement
+    string. A tag already
     carrying a `.dev` segment, or a local `+` segment, is refused by name --
     the first would produce a version with two `.dev` segments (not valid PEP
     440), and the second would bury the commit distance in the local part,

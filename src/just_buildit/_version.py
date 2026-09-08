@@ -35,7 +35,7 @@ git state                  version
 =========================  ===============
 exactly on tag ``v1.1.3``  ``1.1.3``
 5 commits past it          ``1.1.4.dev5``
-5 commits past ``v1.1.3-rc1``  ``1.1.3-rc2.dev5``
+5 commits past ``v1.1.3-rc1``  ``1.1.3rc2.dev5``
 =========================  ===============
 
 Commits past a tag name the release they are working **toward**, never the one
@@ -45,7 +45,13 @@ names, so that string announces "on the way to 1.1.3" in the one state where
 1.1.3 has already been tagged, and sorts below the tag it came after. There is
 no workflow in which that reading is right; it was a mistake, not a trade-off.
 
-`_bump_last_number` has the rule and why one rule covers a pre-release too.
+A tag is PARSED, never string-edited: `_VERSION_RE` is PEP 440's own
+grammar, so every spelling the spec makes equivalent resolves to the same
+version -- `alpha`/`beta`/`c`/`pre`/`preview`, `rev`/`r`, the bare `-N` post
+shorthand, any of `.`/`-`/`_` as a separator, any case, and an omitted
+numeral meaning 0. What is emitted is always the canonical form: the tag's
+spelling is an input, never the output, because the output becomes a wheel
+filename and a requirement string.
 
 Erroring rather than guessing
 -----------------------------
@@ -60,7 +66,7 @@ from __future__ import annotations
 
 import re
 import subprocess
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -125,62 +131,144 @@ def _git(project_root: Path, *args: str) -> str | None:
     return proc.stdout.strip() or None
 
 
-#: The last run of digits in a tag. What gets incremented to name the release
-#: the current commits are working TOWARD, rather than the one already made.
-_LAST_NUMBER_RE = re.compile(r"(?P<num>\d+)(?P<rest>\D*)$")
-
-
-#: A tag that cannot be the BASE of a derived version, because appending a
-#: `.devN` to it does not produce a well-formed one.
+#: PEP 440's own grammar, from the specification's appendix, with the
+#: normalising alternatives it requires a tool to accept: `alpha`/`beta`/`c`/
+#: `pre`/`preview` beside `a`/`b`/`rc`, `rev`/`r` beside `post`, `.`/`-`/`_`
+#: or nothing as separators, the bare `-N` post-release shorthand, and the
+#: leading `v` the spec says "MUST be ignored for all purposes".
 #:
-#: Two shapes, both found by probing the alpha path rather than by reading the
-#: code:
-#:
-#: - it already carries a ``.dev``. `v1.1.3.dev5` + 2 commits gave
-#:   ``1.1.3.dev6.dev2``, which is not a PEP 440 version at all -- the failure
-#:   would surface later, as a rejected upload or an unparseable requirement.
-#: - it carries a local segment (``+``). `v1.1.3+local` gave
-#:   ``1.1.4+local.dev3``, which *is* well-formed and is worse for it: the
-#:   distance lands inside the LOCAL part, so every build past the tag compares
-#:   equal on its public version and nothing can order them. PyPI refuses local
-#:   versions outright.
-#:
-#: Neither is a release tag, so refusing is honest rather than restrictive --
-#: and it is what PEP 621 asks for, the module docstring's "erroring rather
-#: than guessing" applied to the tag instead of to its absence.
-_UNBUMPABLE_RE = re.compile(r"(?i)(?:[-_.]?dev\d*|\+)")
+#: A grammar rather than a string edit, and that is the point. The first
+#: version of this bumped "the last run of digits", which cannot see that
+#: `1.1.3a` MEANS `1.1.3a0` -- so it bumped the release and produced
+#: `1.1.4a.dev3` for a commit that is plainly the first alpha's successor.
+#: Nor could it normalise, so `v1.1.3-rc1` and `v1.1.3ALPHA2` reached the
+#: wheel FILENAME verbatim, as `1.1.3_rc2.dev3` and `1.1.3ALPHA3.dev3`.
+_VERSION_RE = re.compile(
+    r"""
+    ^\s*v?
+    (?:(?P<epoch>[0-9]+)!)?
+    (?P<release>[0-9]+(?:\.[0-9]+)*)
+    (?:[-_.]?(?P<pre_l>alpha|a|beta|b|preview|pre|c|rc)[-_.]?
+        (?P<pre_n>[0-9]+)?)?
+    (?:(?:-(?P<post_n1>[0-9]+))
+        |(?:[-_.]?(?P<post_l>post|rev|r)[-_.]?(?P<post_n2>[0-9]+)?))?
+    (?P<dev_marker>[-_.]?dev[-_.]?(?P<dev_n>[0-9]+)?)?
+    (?:\+(?P<local>[a-z0-9]+(?:[-_.][a-z0-9]+)*))?
+    \s*$
+    """,
+    re.VERBOSE | re.IGNORECASE,
+)
+
+#: The spellings the spec makes equivalent, mapped to their normal form.
+_PRE_NORMAL = {
+    "alpha": "a",
+    "a": "a",
+    "beta": "b",
+    "b": "b",
+    "c": "rc",
+    "pre": "rc",
+    "preview": "rc",
+    "rc": "rc",
+}
 
 
-def _bump_last_number(base: str) -> str | None:
-    """Increment the trailing number of a version, naming the NEXT release.
+class _Version(NamedTuple):
+    """A tag parsed into PEP 440's segments.
 
-    One rule, correct for a final release and a pre-release alike, because in
-    both the trailing number is the thing a further commit moves past:
-
-    =============  =============  ==============================
-    tag            bumped         why
-    =============  =============  ==============================
-    ``1.1.3``      ``1.1.4``      the next patch
-    ``1.1.3rc1``   ``1.1.3rc2``   the next release candidate
-    ``1.1.3-rc1``  ``1.1.3-rc2``  same; PEP 440 normalises the ``-``
-    =============  =============  ==============================
-
-    Bumping the *release* instead would be wrong for the second row:
-    ``1.1.3.dev5`` sorts BELOW ``1.1.3rc1``, because a ``.dev`` segment
-    precedes every pre-release of the same version. Bumping the trailing
-    number keeps each derived version strictly between the tag it followed and
-    the release it anticipates.
-
-    None when the tag carries no digits at all, which the ``v[0-9]*`` match
-    glob already prevents; the caller reads that as "no answer from git".
+    `pre` is a ``(letter, number)`` pair with the letter already normalised;
+    `post` and `dev` are their numbers. An omitted numeral is **0**, not
+    absent -- the spec says so for all three -- and that is exactly the
+    distinction a string edit cannot make.
     """
-    if _UNBUMPABLE_RE.search(base):
-        return None
-    match = _LAST_NUMBER_RE.search(base)
+
+    epoch: int
+    release: tuple[int, ...]
+    pre: tuple[str, int] | None
+    post: int | None
+    dev: int | None
+    local: str | None
+
+
+def _parse(text: str) -> _Version | None:
+    """Parse *text* as a PEP 440 version, or None if it is not one."""
+    match = _VERSION_RE.match(text)
     if match is None:
         return None
-    start, end = match.span("num")
-    return f"{base[:start]}{int(match.group('num')) + 1}{base[end:]}"
+    pre = None
+    if match.group("pre_l") is not None:
+        pre = (
+            _PRE_NORMAL[match.group("pre_l").lower()],
+            int(match.group("pre_n") or 0),
+        )
+    post = None
+    if match.group("post_n1") is not None:
+        post = int(match.group("post_n1"))
+    elif match.group("post_l") is not None:
+        post = int(match.group("post_n2") or 0)
+    dev = None
+    if match.group("dev_marker") is not None:
+        dev = int(match.group("dev_n") or 0)
+    local = match.group("local")
+    return _Version(
+        epoch=int(match.group("epoch") or 0),
+        release=tuple(int(n) for n in match.group("release").split(".")),
+        pre=pre,
+        post=post,
+        dev=dev,
+        local=(
+            local.lower().replace("-", ".").replace("_", ".")
+            if local
+            else None
+        ),
+    )
+
+
+def _render(version: _Version) -> str:
+    """Render *version* in PEP 440's canonical form.
+
+    ``[N!]N(.N)*[{a|b|rc}N][.postN][.devN]`` -- what every other tool writes,
+    so a filename or a requirement built from it matches everyone else's.
+    """
+    out = f"{version.epoch}!" if version.epoch else ""
+    out += ".".join(str(n) for n in version.release)
+    if version.pre is not None:
+        out += f"{version.pre[0]}{version.pre[1]}"
+    if version.post is not None:
+        out += f".post{version.post}"
+    if version.dev is not None:
+        out += f".dev{version.dev}"
+    if version.local is not None:
+        out += f"+{version.local}"
+    return out
+
+
+def _bump(version: _Version) -> _Version:
+    """Return the release *version*'s commits are working toward.
+
+    The trailing segment is what a further commit moves past, so that is what
+    is incremented -- the pre-release number if there is one, else the
+    post-release number, else the last release component:
+
+    ===============  ===============
+    tag              next
+    ===============  ===============
+    ``1.1.3``        ``1.1.4``
+    ``1.1.3a1``      ``1.1.3a2``
+    ``1.1.3a``       ``1.1.3a1``     (the omitted numeral is 0)
+    ``1.1.3.post1``  ``1.1.3.post2``
+    ===============  ===============
+
+    Bumping the *release* would be wrong for every row but the first:
+    ``1.1.3.dev5`` sorts below ``1.1.3a1``, because a ``.dev`` segment
+    precedes every pre-release of the same version.
+    """
+    if version.pre is not None:
+        letter, number = version.pre
+        return version._replace(pre=(letter, number + 1))
+    if version.post is not None:
+        return version._replace(post=version.post + 1)
+    release = (*version.release[:-1], version.release[-1] + 1)
+    return version._replace(release=release)
 
 
 def _from_git(project_root: Path) -> str | None:
@@ -200,19 +288,18 @@ def _from_git(project_root: Path) -> str | None:
         return None
     tag = match.group("tag")
     distance = int(match.group("distance"))
-    base = tag[1:] if tag.startswith("v") else tag
-    if not base:
-        return None
-    if distance == 0:
-        return base
-    # Commits PAST a tag are work toward the NEXT release, so the version they
-    # carry must name that one. Appending `.dev` to the tag itself named the
-    # release already made, which inverts the meaning of the segment and sorts
-    # the build below the tag it came after. See `_bump_last_number`.
-    upcoming = _bump_last_number(base)
-    if upcoming is None:
-        # Raised, not returned as None. None here means "git had no answer",
-        # and the caller turns that into a message about a missing tag -- which
+
+    parsed = _parse(tag)
+    if parsed is None:
+        raise VersionError(
+            f"the nearest tag is {tag!r}, which is not a PEP 440 version, so "
+            "no version can be derived from it.\n"
+            "Tag a release -- 'v1.2.3', or a pre-release such as 'v1.2.3a1' "
+            "/ 'v1.2.3rc1'."
+        )
+    if parsed.dev is not None or parsed.local is not None:
+        # Raised, not returned as None. None means "git had no answer", and
+        # the caller turns that into a message about a MISSING tag -- which
         # would send someone hunting for the tag they are looking straight at.
         raise VersionError(
             f"the nearest tag is {tag!r}, which cannot be the base of a "
@@ -220,12 +307,22 @@ def _from_git(project_root: Path) -> str | None:
             "A tag carrying a '.dev' segment would give a version with two of "
             "them (not a valid PEP 440 version), and one carrying a local "
             "'+' segment would put the commit distance inside the local part, "
-            "where it cannot order anything and where PyPI will not accept "
-            "it.\n"
+            "where it orders nothing and where PyPI will not accept it.\n"
             "Tag a release instead -- 'v1.2.3', or a pre-release such as "
             "'v1.2.3a1' / 'v1.2.3rc1', all of which derive correctly."
         )
-    return f"{upcoming}.dev{distance}"
+
+    # Canonical either way: the tag's own spelling is an input, never the
+    # output. `v1.1.3-rc1` and `v1.1.3ALPHA2` are the same versions as
+    # `1.1.3rc1` and `1.1.3a2`, and emitting them verbatim put a
+    # non-canonical string into the wheel FILENAME.
+    if distance == 0:
+        return _render(parsed)
+    # Commits PAST a tag are work toward the NEXT release, so the version they
+    # carry must name that one. Appending `.dev` to the tag itself named the
+    # release already made, inverting the meaning of the segment and sorting
+    # the build below the tag it came after. See `_bump`.
+    return _render(_bump(parsed)._replace(dev=distance))
 
 
 def resolve(project_root: Path, source: str | None) -> str:
