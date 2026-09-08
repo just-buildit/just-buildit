@@ -68,7 +68,7 @@ that carries a copy, whatever they actually changed.
 | --------------------------- | --------------------------- |
 | exactly on tag `v1.1.3`     | `1.1.3`                     |
 | 5 commits past it           | `1.1.4.dev5`                |
-| 5 commits past `v1.1.3-rc1` | `1.1.3-rc2.dev5`            |
+| 5 commits past `v1.1.3-rc1` | `1.1.3rc2.dev5`             |
 | unpacked sdist, no `.git`   | whatever `PKG-INFO` records |
 
 Commits past a tag name the release they are working **toward**, never the one
@@ -105,6 +105,25 @@ git tag v1.1.3a1        # you decide this is the first alpha
 Those are strictly increasing under PEP 440, in that order. `b1`, `.post1` and
 an epoch (`v1!2.3`) all behave the same way, and the number is bumped
 numerically, so `a9` becomes `a10` rather than a lexical successor.
+
+### Tag spelling does not matter
+
+A tag is parsed with PEP 440's grammar, so every spelling the specification
+makes equivalent gives the same version, and what just-buildit emits is always
+the **canonical** form — it becomes a wheel filename and a requirement string,
+so it must match what every other tool writes.
+
+| tag                                      | version at +3 commits |
+| ---------------------------------------- | --------------------- |
+| `v1.1.3-rc1`, `v1.1.3_rc1`, `v1.1.3.rc1` | `1.1.3rc2.dev3`       |
+| `v1.1.3alpha2`, `v1.1.3ALPHA2`           | `1.1.3a3.dev3`        |
+| `v1.1.3c1`, `v1.1.3preview1`             | `1.1.3rc2.dev3`       |
+| `v1.1.3.rev1`, `v1.1.3-1`                | `1.1.3.post2.dev3`    |
+| `v1.1.3a` (numeral omitted, so `a0`)     | `1.1.3a1.dev3`        |
+| `v1!2.3`                                 | `1!2.4.dev3`          |
+
+A tag that is not a PEP 440 version at all is refused by name rather than
+guessed at.
 
 ### Tags that cannot be a base
 

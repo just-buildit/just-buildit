@@ -107,14 +107,24 @@ class TestDerivedFromGit(unittest.TestCase):
             root = _repo(Path(tmp), commits=5)
             self.assertEqual(_meta.load(root).version, "1.1.4.dev5")
 
-    def test_a_hyphenated_tag_keeps_its_hyphens(self) -> None:
-        """`git describe --long` appends `-<distance>-g<sha>`, so splitting on
-        the first hyphen would turn `v1.1.3-rc1` into `1.1.3`."""
+    def test_a_hyphenated_tag_is_normalised_not_truncated(self) -> None:
+        """Two things at once, and this test asserted the wrong one at first.
+
+        `git describe --long` appends `-<distance>-g<sha>`, so splitting on
+        the first hyphen would turn `v1.1.3-rc1` into `1.1.3` -- that is what
+        the test was written for and it still guards it.
+
+        But it originally expected `1.1.3-rc1` back, baking in a NON-canonical
+        version. PEP 440 makes `-` an accepted separator that normalises away,
+        so the version is `1.1.3rc1`, and the tag's spelling is an input,
+        never the output. Emitting it verbatim put a hyphen into the wheel
+        FILENAME, where `_normalize_version` turned it into `1.1.3_rc1`.
+        """
         with TemporaryDirectory(prefix="jb28-") as tmp:
             root = _repo(Path(tmp))
             _git(root, "tag", "-d", "v1.1.3")
             _git(root, "tag", "v1.1.3-rc1")
-            self.assertEqual(_meta.load(root).version, "1.1.3-rc1")
+            self.assertEqual(_meta.load(root).version, "1.1.3rc1")
 
     def test_a_pre_release_tag_bumps_the_pre_release(self) -> None:
         """`1.1.3.dev5` sorts BELOW `1.1.3rc1`, so bumping the release rather
@@ -127,7 +137,7 @@ class TestDerivedFromGit(unittest.TestCase):
             (root / "src" / "jbdyn" / "__init__.py").write_text("x")
             _git(root, "add", "-A")
             _git(root, "commit", "-qm", "past rc1")
-            self.assertEqual(_meta.load(root).version, "1.1.3-rc2.dev1")
+            self.assertEqual(_meta.load(root).version, "1.1.3rc2.dev1")
 
     def test_a_non_version_tag_is_not_mistaken_for_one(self) -> None:
         """The tag glob is anchored on a digit after the `v`."""
@@ -233,8 +243,8 @@ class TestOrdering(unittest.TestCase):
             _git(root, "add", "-A")
             _git(root, "commit", "-qm", "past rc1")
             derived = Version(_meta.load(root).version)
-        self.assertGreater(derived, Version("1.1.3-rc1"))
-        self.assertLess(derived, Version("1.1.3-rc2"))
+        self.assertGreater(derived, Version("1.1.3rc1"))
+        self.assertLess(derived, Version("1.1.3rc2"))
 
     def test_more_commits_sort_later(self) -> None:
         from packaging.version import Version
@@ -315,6 +325,76 @@ class TestPreReleaseProgression(unittest.TestCase):
         ]:
             with self.subTest(tag=tag, commits=commits):
                 Version(self._at(tag, commits))  # raises if malformed
+
+
+class TestCanonicalForm(unittest.TestCase):
+    """The tag's spelling is an INPUT. What jm emits is PEP 440's canonical
+    form, because it becomes a wheel filename and a requirement string, and
+    `_wheel._normalize_version` only escapes `-` to `_` for the filename --
+    it is not a PEP 440 normaliser and was never meant to be one.
+    """
+
+    def _at(self, tag: str, commits: int = 0) -> str:
+        with TemporaryDirectory(prefix="jb28-") as tmp:
+            root = _repo(Path(tmp))
+            _git(root, "tag", "-d", "v1.1.3")
+            _git(root, "tag", tag)
+            for i in range(commits):
+                (root / "src" / "jbdyn" / "__init__.py").write_text(
+                    "x" * (i + 1)
+                )
+                _git(root, "add", "-A")
+                _git(root, "commit", "-qm", f"c{i}")
+            return _meta.load(root).version
+
+    def test_separators_normalise_away(self) -> None:
+        self.assertEqual(self._at("v1.1.3-rc1", 3), "1.1.3rc2.dev3")
+        self.assertEqual(self._at("v1.1.3_rc1", 3), "1.1.3rc2.dev3")
+        self.assertEqual(self._at("v1.1.3.rc1", 3), "1.1.3rc2.dev3")
+
+    def test_pre_release_spellings_normalise(self) -> None:
+        """`alpha`/`beta`/`c`/`pre`/`preview` are the spec's equivalents."""
+        self.assertEqual(self._at("v1.1.3alpha2", 3), "1.1.3a3.dev3")
+        self.assertEqual(self._at("v1.1.3beta2", 3), "1.1.3b3.dev3")
+        self.assertEqual(self._at("v1.1.3c1", 3), "1.1.3rc2.dev3")
+        self.assertEqual(self._at("v1.1.3preview1", 3), "1.1.3rc2.dev3")
+
+    def test_case_is_ignored(self) -> None:
+        self.assertEqual(self._at("v1.1.3ALPHA2", 3), "1.1.3a3.dev3")
+
+    def test_post_release_spellings_normalise(self) -> None:
+        """`rev` and `r` are equivalents, and a bare `-N` is the shorthand."""
+        self.assertEqual(self._at("v1.1.3.rev1", 3), "1.1.3.post2.dev3")
+        self.assertEqual(self._at("v1.1.3-1", 3), "1.1.3.post2.dev3")
+
+    def test_an_omitted_pre_release_numeral_is_zero(self) -> None:
+        """The spec: "Pre releases allow omitting the numeral in which case it
+        is implicitly assumed to be 0." A string edit cannot see that, and so
+        bumped the RELEASE, giving `1.1.4a.dev3` for the first alpha's own
+        successor."""
+        self.assertEqual(self._at("v1.1.3a", 0), "1.1.3a0")
+        self.assertEqual(self._at("v1.1.3a", 3), "1.1.3a1.dev3")
+
+    def test_an_epoch_survives(self) -> None:
+        self.assertEqual(self._at("v1!2.3", 3), "1!2.4.dev3")
+
+    def test_what_reaches_the_wheel_filename_is_canonical(self) -> None:
+        """The consequence that made this worth fixing rather than tidying."""
+        from just_buildit._wheel import _normalize_version
+
+        for tag in ("v1.1.3-rc1", "v1.1.3ALPHA2", "v1.1.3-1"):
+            with self.subTest(tag=tag):
+                version = self._at(tag, 3)
+                self.assertEqual(_normalize_version(version), version)
+
+    def test_a_tag_that_is_not_a_version_is_refused_by_name(self) -> None:
+        with TemporaryDirectory(prefix="jb28-") as tmp:
+            root = _repo(Path(tmp))
+            _git(root, "tag", "-d", "v1.1.3")
+            _git(root, "tag", "v1.2.3.4nonsense")
+            with self.assertRaises(_version.VersionError) as ctx:
+                _meta.load(root)
+            self.assertIn("not a PEP 440 version", str(ctx.exception))
 
 
 class TestUnbumpableTags(unittest.TestCase):
