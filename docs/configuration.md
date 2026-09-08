@@ -64,25 +64,23 @@ that carries a copy, whatever they actually changed.
     and the version recorded in it is that artifact's identity.
 1. **`git describe`** against the nearest `v*` tag.
 
-| git state                 | version                     |
-| ------------------------- | --------------------------- |
-| exactly on tag `v1.1.3`   | `1.1.3`                     |
-| 5 commits past it         | `1.1.3.dev5`                |
-| unpacked sdist, no `.git` | whatever `PKG-INFO` records |
+| git state                   | version                     |
+| --------------------------- | --------------------------- |
+| exactly on tag `v1.1.3`     | `1.1.3`                     |
+| 5 commits past it           | `1.1.4.dev5`                |
+| 5 commits past `v1.1.3-rc1` | `1.1.3-rc2.dev5`            |
+| unpacked sdist, no `.git`   | whatever `PKG-INFO` records |
+
+Commits past a tag name the release they are working **toward**, never the one
+already made. Each derived version therefore sorts strictly after the tag it
+followed and strictly before the release it anticipates, which is what makes a
+stream of dev builds usable on an index.
 
 `PKG-INFO` is checked **first**, and that ordering is what closes the loop: an
 sdist built from a checkout carries a concrete number, so the wheel built from
 that sdist agrees with it without needing a repository that is no longer there.
 It also stops an sdist unpacked inside an unrelated checkout from picking up
 that checkout's tags.
-
-!!! warning "`.devN` sorts *before* the release it follows"
-
-    Under PEP 440, `1.1.3.dev5` is a pre-release **of** `1.1.3`, not a
-    successor to it. If you publish builds taken from commits after the
-    `v1.1.3` tag alongside `1.1.3` itself, the release wins every resolution
-    and those dev builds are unreachable. Tag before the series it opens, or
-    keep dev builds off the index.
 
 ### When it cannot be determined
 

@@ -28,9 +28,12 @@
     would upload a wrong version instead of failing the build. A project that
     says nothing about `dynamic` behaves exactly as before.
 
-    Note that `.devN` sorts *before* the tag it follows under PEP 440, so
-    publishing dev builds beside their release makes them unreachable; #29
-    tracks offering the bump-the-patch alternative.
+    A derived version names the release its commits are working **toward**:
+    five commits past `v1.1.3` is `1.1.4.dev5`, and five past `v1.1.3-rc1` is
+    `1.1.3-rc2.dev5`. Each one therefore sorts strictly after the tag it
+    followed and strictly before the release it anticipates (#29 -- this
+    briefly read `1.1.3.dev5` on the branch, which inverted the meaning of the
+    `.dev` segment; it never reached a release).
 
 ### CI
 

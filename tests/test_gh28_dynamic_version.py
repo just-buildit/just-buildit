@@ -94,10 +94,18 @@ class TestDerivedFromGit(unittest.TestCase):
             root = _repo(Path(tmp))
             self.assertEqual(_meta.load(root).version, "1.1.3")
 
-    def test_distance_past_the_tag_is_a_dev_release(self) -> None:
+    def test_distance_past_the_tag_names_the_next_release(self) -> None:
+        """gh-29. Commits after `v1.1.3` are work toward 1.1.4, so they carry
+        `1.1.4.dev5`.
+
+        This asserted `1.1.3.dev5` when the feature landed, which inverted the
+        meaning of the `.dev` segment: `1.1.3.dev5` announces "a dev build on
+        the way TO 1.1.3" in the one state where 1.1.3 has already been
+        tagged.
+        """
         with TemporaryDirectory(prefix="jb28-") as tmp:
             root = _repo(Path(tmp), commits=5)
-            self.assertEqual(_meta.load(root).version, "1.1.3.dev5")
+            self.assertEqual(_meta.load(root).version, "1.1.4.dev5")
 
     def test_a_hyphenated_tag_keeps_its_hyphens(self) -> None:
         """`git describe --long` appends `-<distance>-g<sha>`, so splitting on
@@ -107,6 +115,19 @@ class TestDerivedFromGit(unittest.TestCase):
             _git(root, "tag", "-d", "v1.1.3")
             _git(root, "tag", "v1.1.3-rc1")
             self.assertEqual(_meta.load(root).version, "1.1.3-rc1")
+
+    def test_a_pre_release_tag_bumps_the_pre_release(self) -> None:
+        """`1.1.3.dev5` sorts BELOW `1.1.3rc1`, so bumping the release rather
+        than the trailing number would put the build behind the tag again --
+        the same inversion gh-29 fixed, one segment along."""
+        with TemporaryDirectory(prefix="jb28-") as tmp:
+            root = _repo(Path(tmp))
+            _git(root, "tag", "-d", "v1.1.3")
+            _git(root, "tag", "v1.1.3-rc1")
+            (root / "src" / "jbdyn" / "__init__.py").write_text("x")
+            _git(root, "add", "-A")
+            _git(root, "commit", "-qm", "past rc1")
+            self.assertEqual(_meta.load(root).version, "1.1.3-rc2.dev1")
 
     def test_a_non_version_tag_is_not_mistaken_for_one(self) -> None:
         """The tag glob is anchored on a digit after the `v`."""
@@ -167,7 +188,58 @@ class TestSdistIdentity(unittest.TestCase):
             tree = next(p for p in unpacked.iterdir() if p.is_dir())
 
             self.assertFalse((tree / ".git").exists())
-            self.assertEqual(_meta.load(tree).version, "1.1.3.dev5")
+            self.assertEqual(_meta.load(tree).version, "1.1.4.dev5")
+
+
+class TestOrdering(unittest.TestCase):
+    """The property the version scheme exists to satisfy, judged by PEP 440.
+
+    Deliberately not an assertion about the string jm produces -- that is the
+    thing under test, and a gate whose reference comes from the code it checks
+    is blind to exactly the fault that matters here. `packaging` is an
+    independent implementation of the ordering rules, so it can say the
+    original scheme was wrong without being told what "wrong" looks like.
+    """
+
+    def _derived(self, commits: int) -> str:
+        with TemporaryDirectory(prefix="jb28-") as tmp:
+            return _meta.load(_repo(Path(tmp), commits=commits)).version
+
+    def test_a_build_after_a_tag_sorts_after_that_tag(self) -> None:
+        from packaging.version import Version
+
+        self.assertGreater(Version(self._derived(5)), Version("1.1.3"))
+
+    def test_it_sorts_before_the_release_it_anticipates(self) -> None:
+        from packaging.version import Version
+
+        self.assertLess(Version(self._derived(5)), Version("1.1.4"))
+
+    def test_a_build_after_a_pre_release_tag_sorts_after_it_too(self) -> None:
+        """The ordering property, on the shape that breaks differently.
+
+        A `.dev` segment precedes every pre-release of the same version, so
+        leaving a pre-release tag unbumped puts the build BELOW the tag it
+        followed even though bumping a final release would have been fine.
+        The final-release oracle above cannot see that.
+        """
+        from packaging.version import Version
+
+        with TemporaryDirectory(prefix="jb28-") as tmp:
+            root = _repo(Path(tmp))
+            _git(root, "tag", "-d", "v1.1.3")
+            _git(root, "tag", "v1.1.3-rc1")
+            (root / "src" / "jbdyn" / "__init__.py").write_text("x")
+            _git(root, "add", "-A")
+            _git(root, "commit", "-qm", "past rc1")
+            derived = Version(_meta.load(root).version)
+        self.assertGreater(derived, Version("1.1.3-rc1"))
+        self.assertLess(derived, Version("1.1.3-rc2"))
+
+    def test_more_commits_sort_later(self) -> None:
+        from packaging.version import Version
+
+        self.assertLess(Version(self._derived(1)), Version(self._derived(5)))
 
 
 class TestRefusals(unittest.TestCase):

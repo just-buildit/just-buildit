@@ -30,20 +30,22 @@ rather than needing a repository that is no longer there.
 
 The shape of a derived version
 ------------------------------
-======================  ==============
-git state               version
-======================  ==============
+=========================  ===============
+git state                  version
+=========================  ===============
 exactly on tag ``v1.1.3``  ``1.1.3``
-5 commits past it          ``1.1.3.dev5``
-======================  ==============
+5 commits past it          ``1.1.4.dev5``
+5 commits past ``v1.1.3-rc1``  ``1.1.3-rc2.dev5``
+=========================  ===============
 
-Note for anyone reading a published index: ``1.1.3.dev5`` sorts *before*
-``1.1.3`` under PEP 440, because a ``.devN`` segment marks a pre-release of the
-version it names rather than a successor to it. That is the documented,
-requested mapping, and it is the right one for a project whose tag marks the
-*end* of a series — but if these builds are ever published alongside the
-release they follow, the release wins the resolution and the dev builds are
-unreachable. gh-29 tracks offering the bump-the-patch alternative.
+Commits past a tag name the release they are working **toward**, never the one
+already made. gh-29: this first shipped as ``1.1.3.dev5``, which inverts the
+meaning of the segment — ``.devN`` marks a pre-release *of* the version it
+names, so that string announces "on the way to 1.1.3" in the one state where
+1.1.3 has already been tagged, and sorts below the tag it came after. There is
+no workflow in which that reading is right; it was a mistake, not a trade-off.
+
+`_bump_last_number` has the rule and why one rule covers a pre-release too.
 
 Erroring rather than guessing
 -----------------------------
@@ -123,6 +125,41 @@ def _git(project_root: Path, *args: str) -> str | None:
     return proc.stdout.strip() or None
 
 
+#: The last run of digits in a tag. What gets incremented to name the release
+#: the current commits are working TOWARD, rather than the one already made.
+_LAST_NUMBER_RE = re.compile(r"(?P<num>\d+)(?P<rest>\D*)$")
+
+
+def _bump_last_number(base: str) -> str | None:
+    """Increment the trailing number of a version, naming the NEXT release.
+
+    One rule, correct for a final release and a pre-release alike, because in
+    both the trailing number is the thing a further commit moves past:
+
+    =============  =============  ==============================
+    tag            bumped         why
+    =============  =============  ==============================
+    ``1.1.3``      ``1.1.4``      the next patch
+    ``1.1.3rc1``   ``1.1.3rc2``   the next release candidate
+    ``1.1.3-rc1``  ``1.1.3-rc2``  same; PEP 440 normalises the ``-``
+    =============  =============  ==============================
+
+    Bumping the *release* instead would be wrong for the second row:
+    ``1.1.3.dev5`` sorts BELOW ``1.1.3rc1``, because a ``.dev`` segment
+    precedes every pre-release of the same version. Bumping the trailing
+    number keeps each derived version strictly between the tag it followed and
+    the release it anticipates.
+
+    None when the tag carries no digits at all, which the ``v[0-9]*`` match
+    glob already prevents; the caller reads that as "no answer from git".
+    """
+    match = _LAST_NUMBER_RE.search(base)
+    if match is None:
+        return None
+    start, end = match.span("num")
+    return f"{base[:start]}{int(match.group('num')) + 1}{base[end:]}"
+
+
 def _from_git(project_root: Path) -> str | None:
     """``git describe`` turned into a PEP 440 version, or None.
 
@@ -143,7 +180,16 @@ def _from_git(project_root: Path) -> str | None:
     base = tag[1:] if tag.startswith("v") else tag
     if not base:
         return None
-    return base if distance == 0 else f"{base}.dev{distance}"
+    if distance == 0:
+        return base
+    # Commits PAST a tag are work toward the NEXT release, so the version they
+    # carry must name that one. Appending `.dev` to the tag itself named the
+    # release already made, which inverts the meaning of the segment and sorts
+    # the build below the tag it came after. See `_bump_last_number`.
+    upcoming = _bump_last_number(base)
+    if upcoming is None:
+        return None
+    return f"{upcoming}.dev{distance}"
 
 
 def resolve(project_root: Path, source: str | None) -> str:
@@ -178,7 +224,7 @@ def resolve(project_root: Path, source: str | None) -> str:
         $ python -c "from pathlib import Path
         > from just_buildit._version import resolve
         > print(resolve(Path('.'), 'vcs'))"
-        1.1.3.dev5
+        1.1.4.dev5
     """
     if source is None:
         raise VersionError(
