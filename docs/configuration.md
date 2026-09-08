@@ -10,6 +10,7 @@ package       = "my_package"  # optional — package dir; defaults to normalized
 editable_path = "src"         # optional — src root for .pth editable installs; auto-detected as src/ if present
 repair        = "uvx ..."     # optional — auto-detected by platform, or false to skip
 repair-args   = ["--plat", "manylinux_2_28_x86_64"]  # optional — extra args appended to the repair command
+version-from  = "vcs"         # optional — derive [project] version; requires dynamic = ["version"]
 exclude = [                   # optional — glob patterns relative to $JUST_BUILDIT_OUTPUT_DIR
     "mypkg/tests/**",
     "mypkg/bench/**",
@@ -33,6 +34,70 @@ exclude = [                   # optional — glob patterns relative to $JUST_BUI
 
     Set `pure = true` to keep them as package data (useful when shipping C
     source templates or scaffolding examples alongside Python code).
+
+______________________________________________________________________
+
+## Deriving the version
+
+`[project] version` may be **derived at build time** instead of written as a
+literal. List it in PEP 621's `dynamic` and name a source:
+
+```toml
+[project]
+name = "my_package"
+dynamic = ["version"]
+
+[tool.just-buildit]
+version-from = "vcs"
+```
+
+The point is to remove the version as a *tracked file*. A package index refuses
+a duplicate filename, so a re-used version is a rejected upload — with a
+literal, every PR has to bump it, and any two open PRs conflict on every file
+that carries a copy, whatever they actually changed.
+
+### Where the value comes from
+
+`version-from = "vcs"` is currently the only source. It resolves in two steps:
+
+1. **A sibling `PKG-INFO`.** Its presence means the tree is an unpacked sdist,
+    and the version recorded in it is that artifact's identity.
+1. **`git describe`** against the nearest `v*` tag.
+
+| git state                 | version                     |
+| ------------------------- | --------------------------- |
+| exactly on tag `v1.1.3`   | `1.1.3`                     |
+| 5 commits past it         | `1.1.3.dev5`                |
+| unpacked sdist, no `.git` | whatever `PKG-INFO` records |
+
+`PKG-INFO` is checked **first**, and that ordering is what closes the loop: an
+sdist built from a checkout carries a concrete number, so the wheel built from
+that sdist agrees with it without needing a repository that is no longer there.
+It also stops an sdist unpacked inside an unrelated checkout from picking up
+that checkout's tags.
+
+!!! warning "`.devN` sorts *before* the release it follows"
+
+    Under PEP 440, `1.1.3.dev5` is a pre-release **of** `1.1.3`, not a
+    successor to it. If you publish builds taken from commits after the
+    `v1.1.3` tag alongside `1.1.3` itself, the release wins every resolution
+    and those dev builds are unreachable. Tag before the series it opens, or
+    keep dev builds off the index.
+
+### When it cannot be determined
+
+PEP 621 requires a back-end to raise an error if a field is listed in `dynamic`
+and cannot be computed, so an untagged repository, a missing `git`, and a tree
+that is neither a checkout nor an sdist are all build failures naming the two
+ways out. There is deliberately no `0.0.0` placeholder: that would upload a
+wrong version rather than fail.
+
+Three further rules, also PEP 621's:
+
+- `name` may never appear in `dynamic`.
+- Giving `version` both statically **and** in `dynamic` is an error — pick one.
+- A project that says nothing about `dynamic` behaves exactly as before, so a
+    literal version is still perfectly good.
 
 ______________________________________________________________________
 

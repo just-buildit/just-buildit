@@ -3,7 +3,8 @@ _meta.py — parse pyproject.toml for just-buildit.
 
 Extracts:
   - project.name
-  - project.version
+  - project.version             (or `dynamic = ["version"]` +
+                                  tool.just-buildit.version-from; see _version)
   - project.description           (optional -> METADATA Summary)
   - project.readme                (optional -> METADATA Description
                                     + content-type)
@@ -25,9 +26,13 @@ Extracts:
                                        False to skip)
   - tool.just-buildit.editable_path  (optional; src root for .pth editable
                                        installs; defaults to src/ if present)
+  - tool.just-buildit.version-from   (optional; "vcs" to derive the version
+                                       from git/PKG-INFO instead of a literal)
 """
 
 from __future__ import annotations
+
+from . import _version
 
 try:
     import tomllib
@@ -130,6 +135,63 @@ def _parse_license(
     return None, []
 
 
+def _resolve_version(
+    project_root: Path, project: dict[str, Any], jb: dict[str, Any]
+) -> str:
+    """``[project] version``, derived when it is listed in ``dynamic``.
+
+    gh-28. PEP 621 allows ``version`` in ``dynamic`` precisely so a back-end
+    can compute it, which is the only way to stop the version being a
+    hand-edited literal that every commit must bump.
+
+    The three refusals here are the specification's, not house style:
+
+    - ``name`` in ``dynamic`` — "A build back-end MUST raise an error if the
+      metadata specifies ``name`` in ``dynamic``."
+    - a key given statically *and* listed in ``dynamic`` — "Build back-ends
+      MUST raise an error". (The exception the spec grants for list- and
+      table-valued keys, which a back-end may append to, does not reach
+      ``version``.)
+    - listed in ``dynamic`` but underivable — see `_version.resolve`, which
+      raises rather than inventing a placeholder.
+
+    A project that says nothing about ``dynamic`` takes the same path it
+    always did, so every existing project is unaffected.
+    """
+    dynamic = project.get("dynamic") or []
+    if not isinstance(dynamic, list):
+        raise ValueError(
+            "[project] dynamic must be a list of field names, "
+            f"not {type(dynamic).__name__}."
+        )
+
+    if "name" in dynamic:
+        raise ValueError(
+            "[project] dynamic lists 'name', which PEP 621 does not allow: "
+            "a project's name can never be computed by the build back-end."
+        )
+
+    version = project.get("version")
+
+    if "version" not in dynamic:
+        if not version:
+            raise ValueError(
+                "[project] version is required in pyproject.toml.\n"
+                "Either set it, or list it in [project] dynamic and add "
+                '[tool.just-buildit] version-from = "vcs" to derive it.'
+            )
+        return str(version)
+
+    if version is not None:
+        raise ValueError(
+            "[project] gives version both statically and in 'dynamic'. "
+            "PEP 621 allows one or the other: remove the literal to derive "
+            "it, or drop 'version' from dynamic to keep it."
+        )
+
+    return _version.resolve(project_root, jb.get("version-from"))
+
+
 def load(project_root: Path) -> BuildConfig:
     toml_path = project_root / "pyproject.toml"
     if not toml_path.exists():
@@ -144,11 +206,9 @@ def load(project_root: Path) -> BuildConfig:
     if not name:
         raise ValueError("[project] name is required in pyproject.toml")
 
-    version = project.get("version")
-    if not version:
-        raise ValueError("[project] version is required in pyproject.toml")
-
     jb = data.get("tool", {}).get("just-buildit", {})
+
+    version = _resolve_version(project_root, project, jb)
 
     command = (
         jb.get("command") or None
