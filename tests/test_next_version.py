@@ -139,6 +139,32 @@ class TestItRefusesRatherThanGuesses(unittest.TestCase):
                 _next(root)
             self.assertIn("git tag", str(ctx.exception))
 
+    def test_a_dev_carrying_tag_is_refused_here_too(self) -> None:
+        """And with the SAME message the build gives, not merely a similar
+        one.
+
+        `v1.1.2.dev1` cannot be the base of a derived version -- appending a
+        distance would give two `.dev` segments, which is not a valid PEP 440
+        version. That guard lives in `_describe`, which both readings share,
+        and this asserts the sharing rather than the refusal: two guards that
+        merely agree today are free to stop agreeing, and the failure mode is
+        a tag the build rejects and the release query happily bumps.
+        """
+        with TemporaryDirectory() as tmp:
+            root = _repo(Path(tmp))
+            _git(root, "tag", "-d", "v1.1.3")
+            _git(root, "tag", "v1.1.2.dev1")
+
+            with self.assertRaises(_version.VersionError) as from_build:
+                _version.resolve(root, "vcs")
+            with self.assertRaises(_version.VersionError) as from_query:
+                _next(root)
+
+            self.assertIn("v1.1.2.dev1", str(from_query.exception))
+            self.assertEqual(
+                str(from_build.exception), str(from_query.exception)
+            )
+
     def test_pkg_info_is_deliberately_not_consulted(self) -> None:
         """The asymmetry with `resolve`, gated so it stays deliberate.
 
