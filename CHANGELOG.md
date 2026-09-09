@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-09-09
+
 ### Added
 
 - **`just-buildit --next-version` prints the version the next release would
