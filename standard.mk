@@ -228,10 +228,28 @@ format: ## Auto-fix formatting with every configured formatter
 
 # System packages, from bootstrap.toml. A repo that declares none still gets a
 # working target — `jbx install-deps` is a no-op there.
+#
+# INSTALL_DEPS_CMD exists for the repo that OWNS the script this target
+# fetches. just-bashit runs `bash src/just_bashit/install-deps.sh` in CI and
+# the published copy from `make install-deps`, so one step had two execution
+# homes and the source under development was never the thing exercised
+# locally. Overriding the command is the fix; a private copy of this target
+# would be the same drift in a different file.
+#
+# The default is the fetch, so every repo that does not set it is unchanged.
+# A canned recipe rather than a one-liner, like RELEASE_WATCH_CMD: joining the
+# two commands with `;` would put them in one shell and silence the second,
+# changing what every repo sees for no reason.
+define _STD_INSTALL_DEPS_CMD
+@command -v jbx >/dev/null 2>&1 \
+    || curl -sSL https://just-buildit.github.io/get-jb.sh | bash
+PATH="$$HOME/.local/bin:$$PATH" jbx install-deps
+endef
+
+INSTALL_DEPS_CMD ?= $(_STD_INSTALL_DEPS_CMD)
+
 install-deps: ## Install system build dependencies (bootstrap.toml)
-	@command -v jbx >/dev/null 2>&1 \
-	    || curl -sSL https://just-buildit.github.io/get-jb.sh | bash
-	PATH="$$HOME/.local/bin:$$PATH" jbx install-deps
+	$(INSTALL_DEPS_CMD)
 
 # Project dependencies plus the git hook. There is deliberately no second
 # deps-ish target: `install` was a strict subset of this and has been folded in.
