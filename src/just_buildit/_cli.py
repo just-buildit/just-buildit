@@ -18,8 +18,9 @@ Options:
   -V, --version  Print just-buildit's own version and exit
 
 Queries (about the project in the current directory):
-  --next-version  Print the version its next release would carry, for a
-                  project that derives its version from git tags
+  --current-version  Print the version it builds as right now
+  --next-version     Print the version its next release would carry, for a
+                     project that derives its version from git tags
 """
 
 
@@ -31,6 +32,8 @@ def main() -> None:
         from just_buildit import __version__
 
         print(__version__)
+    elif args[0] == "--current-version":
+        _current_version()
     elif args[0] == "--next-version":
         _next_version()
     elif args[0] == "inspect":
@@ -42,6 +45,38 @@ def main() -> None:
     else:
         print(f"just-buildit: unknown command '{args[0]}'", file=sys.stderr)
         print("Run 'just-buildit help' for usage.", file=sys.stderr)
+        sys.exit(1)
+
+
+def _current_version() -> None:
+    """Print the version this project builds as, and nothing else.
+
+    The number the wheel will carry, whether it is a literal in
+    `[project] version` or derived from a git tag. That is the question CI
+    asks when it needs to know what it just built -- and with a derived
+    version there is no file to read it out of, which is the whole point of
+    gh-28.
+
+    Deliberately routed through `_meta.load`, the same call `inspect` and the
+    build itself use, rather than a narrower path that reads fewer keys. The
+    value has to be *the* version, so it must come from the one resolution
+    every artifact goes through; a second, cheaper route would be free to
+    disagree with the wheel. That is the opposite trade-off from
+    `_version.next_version`, which asks only which SOURCE is declared and so
+    reads the two keys it needs -- a different question, not a different
+    answer to the same one.
+
+    Bare on stdout for `VERSION=$(just-buildit --current-version)`, with every
+    diagnostic on stderr and a non-zero exit.
+    """
+    from . import _meta
+    from ._version import VersionError
+
+    project_root = Path.cwd()
+    try:
+        print(_meta.load(project_root).version)
+    except (FileNotFoundError, ValueError, VersionError) as e:
+        print(f"error: {e}", file=sys.stderr)
         sys.exit(1)
 
 

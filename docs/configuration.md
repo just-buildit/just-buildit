@@ -82,16 +82,27 @@ that sdist agrees with it without needing a repository that is no longer there.
 It also stops an sdist unpacked inside an unrelated checkout from picking up
 that checkout's tags.
 
-### Asking for the next version
+### Asking what the version is
 
 Deriving the version removes it from every tracked file, which is the point —
 and the reason CI then has nothing to read it out of. There is no
-`[project] version` to grep and no file for a version check to probe, so a
-release job needs a way to ask:
+`[project] version` to grep and no file for a version check to probe, so
+there are two questions to ask, and they are different:
 
 ```bash
-just-buildit --next-version      # -> 1.1.4
+just-buildit --current-version   # -> 1.1.4.dev5   what this tree builds as
+just-buildit --next-version      # -> 1.1.4        what a release would tag
 ```
+
+`--current-version` is the one a job usually wants: the number the wheel it
+just built actually carries. It answers for **every** project, literal
+version or derived, because the version a tree builds as is a fact about the
+tree. It is the same value `inspect` reports, from the same resolution the
+build itself uses — so it cannot disagree with the artifact, which scraping
+`inspect`'s human output could.
+
+`--next-version` answers a different question, and refuses where there is no
+answer; the rest of this section is about it.
 
 It prints the version the **next release** would carry, and nothing else, so
 it can be captured directly:
