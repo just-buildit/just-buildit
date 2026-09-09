@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-09-09
+
 ### Added
 
 - **`just-buildit --current-version` prints the version this tree builds
