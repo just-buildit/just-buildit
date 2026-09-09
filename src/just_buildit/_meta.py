@@ -192,13 +192,56 @@ def _resolve_version(
     return _version.resolve(project_root, jb.get("version-from"))
 
 
-def load(project_root: Path) -> BuildConfig:
+def _load_toml(project_root: Path) -> dict:
+    """Parse ``pyproject.toml``, or say plainly that there is none.
+
+    Shared so `load` and `version_source` cannot disagree about where the file
+    is or what a missing one means.
+    """
     toml_path = project_root / "pyproject.toml"
     if not toml_path.exists():
         raise FileNotFoundError(f"No pyproject.toml found in {project_root}")
 
     with toml_path.open("rb") as f:
-        data = tomllib.load(f)
+        return tomllib.load(f)
+
+
+def version_source(project_root: Path) -> str | None:
+    """``[tool.just-buildit] version-from``, for a DERIVED-version project.
+
+    Deliberately narrow: it answers only for a project that lists ``version``
+    in ``[project] dynamic``, and refuses otherwise. A project carrying a
+    literal version has no derivation scheme to report, and guessing which
+    digit its next release bumps is precisely the decision a tool cannot make
+    -- the release runbook's one irreducibly human step.
+
+    It reads the two keys it needs rather than going through `load`, which
+    would resolve the version, read the README and parse the licence: a query
+    about the next tag should not fail because the summary is malformed.
+    """
+    data = _load_toml(project_root)
+    project = data.get("project", {})
+    dynamic = project.get("dynamic") or []
+    if not isinstance(dynamic, list) or "version" not in dynamic:
+        literal = project.get("version")
+        raise ValueError(
+            "this project does not derive its version, so there is no next "
+            "version to compute.\n"
+            + (
+                f"[project] version is the literal {literal!r}, and which "
+                "digit the next release bumps is a decision, not a fact "
+                "about the repository.\n"
+                if literal
+                else ""
+            )
+            + "--next-version answers for a project that lists 'version' in "
+            '[project] dynamic with [tool.just-buildit] version-from = "vcs".'
+        )
+    return data.get("tool", {}).get("just-buildit", {}).get("version-from")
+
+
+def load(project_root: Path) -> BuildConfig:
+    data = _load_toml(project_root)
 
     project = data.get("project", {})
 
