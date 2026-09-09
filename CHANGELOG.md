@@ -2,6 +2,30 @@
 
 ## [Unreleased]
 
+### Added
+
+- **`just-buildit --current-version` prints the version this tree builds
+    as.** The sibling of `--next-version` from 0.5.0, and the one a CI job
+    usually wants: not "what should I tag next" but "what did I just build".
+    With a derived version there is no file carrying the number, so the only
+    ways to get it were to scrape `inspect`'s human report or to re-derive it
+    -- and scraping output formatted for people is how a pipeline breaks on a
+    cosmetic change.
+
+    It answers for **every** project, literal version or derived, because the
+    version a tree builds as is a fact about the tree. `--next-version`
+    refuses on a literal because which digit a release bumps is a judgement;
+    the two correctly serve different sets of projects.
+
+    Routed through `_meta.load`, the same resolution `inspect` and the build
+    itself use, rather than a cheaper path reading fewer keys: the value has
+    to be *the* version, so a second route would be free to disagree with the
+    wheel. Gated on exactly that -- the query and `inspect` must report the
+    same string, for a derived version, on a tag, and for a literal.
+
+    Bare on stdout for `VERSION=$(just-buildit --current-version)`, with
+    diagnostics on stderr and a non-zero exit.
+
 ## [0.5.0] — 2026-09-09
 
 ### Added
