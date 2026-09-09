@@ -31,6 +31,32 @@
     `PKG-INFO` first: "what comes next" is a question about a repository's
     history, and an sdist has neither tags nor a future.
 
+### Fixed
+
+- **The refusal of a `.dev` or local tag now gives the real reason (#36).**
+    The refusal itself was right and is unchanged; two of the three reasons
+    it stated were false. It claimed a derived version would carry two `.dev`
+    segments and not be valid PEP 440, and that a local tag would put the
+    commit distance inside the local part. Measured with the guard removed,
+    `v1.1.2.dev1` derives `1.1.3.dev1` -- one segment, perfectly valid -- and
+    `v1.1.2+foo` derives `1.1.3.dev1+foo`, with the distance in `.dev1` where
+    it orders fine. `_bump` never touches `dev` and the caller overwrites it,
+    so the double it warned about cannot occur; someone acting on that
+    sentence would have gone hunting for it.
+
+    The true reason is a better argument for refusing. `v1.1.2.dev1` means
+    "on the way to 1.1.2", and `_bump` has no rung beneath `.dev`, so it
+    bumps the segment above and derives `1.1.3.dev<n>` -- **silently skipping
+    the 1.1.2 the tag was working toward**. That output is well-formed and
+    correctly ordered, so nothing downstream would reject it, which is worse
+    than malformed.
+
+    Now two refusals rather than one sentence with two clauses, because the
+    reasons are unrelated: a `.dev` tag has no derivable successor, and a
+    local tag would produce a version no index accepts. Surfaced by #34,
+    which made `--next-version` a second caller repeating the wrong
+    explanation to a release job.
+
 ### Changed
 
 - **Re-vendored `standard.mk` to pick up `INSTALL_DEPS_CMD`
