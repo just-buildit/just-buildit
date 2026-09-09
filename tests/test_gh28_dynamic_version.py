@@ -422,6 +422,46 @@ class TestUnbumpableTags(unittest.TestCase):
     def test_a_local_version_tag_is_refused(self) -> None:
         self.assertIn("cannot be the base", self._resolve("v1.1.3+local"))
 
+    def test_the_dev_refusal_names_the_release_it_would_skip(self) -> None:
+        """gh-36. The reason, not just the verdict.
+
+        `v1.1.3.dev5` means "on the way to 1.1.3". Deriving from it bumps the
+        segment above and gives `1.1.4.dev<n>`, abandoning the 1.1.3 the tag
+        was working toward -- and that output is well-formed and correctly
+        ordered, so nothing downstream would reject it. Naming the skipped
+        release is the whole value of the message.
+        """
+        message = self._resolve("v1.1.3.dev5")
+        self.assertIn("1.1.3", message)  # what it was working toward
+        self.assertIn("1.1.4", message)  # what deriving would give instead
+        self.assertIn("skipping", message)
+
+    def test_the_dev_refusal_makes_no_claim_about_validity(self) -> None:
+        """gh-36, as a ratchet against the sentence this replaced.
+
+        It said a derived version would carry two `.dev` segments and be
+        invalid PEP 440. Measured with the guard removed, `v1.1.2.dev1`
+        derives `1.1.3.dev1`: one segment, perfectly valid. `_bump` never
+        touches `dev` and the caller overwrites it, so the double it warned
+        about cannot occur -- and someone acting on that sentence would go
+        hunting for it.
+        """
+        message = self._resolve("v1.1.3.dev5")
+        self.assertNotIn("two of them", message)
+        self.assertNotIn("not a valid", message)
+
+    def test_the_local_refusal_cites_the_index_not_the_ordering(self) -> None:
+        """gh-36. The old sentence said a local tag would put the commit
+        distance inside the local part, "where it orders nothing". It does
+        not -- `_render` emits `.devN` before `+local`, so `v1.1.2+foo`
+        derives `1.1.3.dev1+foo` and the distance orders fine. The real
+        problem is the one clause that was true: a local version cannot be
+        published.
+        """
+        message = self._resolve("v1.1.3+local")
+        self.assertIn("index", message)
+        self.assertNotIn("orders nothing", message)
+
     def test_the_refusal_does_not_blame_a_missing_tag(self) -> None:
         """The specific message, not the generic one."""
         self.assertNotIn("no matching tag yet", self._resolve("v1.1.3.dev5"))

@@ -310,19 +310,49 @@ def _describe(project_root: Path) -> _Described | None:
             "Tag a release -- 'v1.2.3', or a pre-release such as 'v1.2.3a1' "
             "/ 'v1.2.3rc1'."
         )
-    if parsed.dev is not None or parsed.local is not None:
-        # Raised, not returned as None. None means "git had no answer", and
-        # the caller turns that into a message about a MISSING tag -- which
-        # would send someone hunting for the tag they are looking straight at.
+    # Raised, not returned as None. None means "git had no answer", and the
+    # caller turns that into a message about a MISSING tag -- which would send
+    # someone hunting for the tag they are looking straight at.
+    #
+    # TWO refusals, not one with two clauses. gh-36: they were fused, and the
+    # shared sentence claimed a derived version would carry two `.dev`
+    # segments and be invalid, and that a local tag would put the distance
+    # inside the local part. Measured with the guard removed, neither is true:
+    # `v1.1.2.dev1` derives `1.1.3.dev1` and `v1.1.2+foo` derives
+    # `1.1.3.dev1+foo`. `_bump` never touches `dev` and the caller overwrites
+    # it, so a double `.dev` cannot occur, and `_render` puts `+local` last.
+    #
+    # The real reasons are different from each other, which is why one
+    # sentence could not state either correctly.
+    _tag_help = (
+        "Tag a release instead -- 'v1.2.3', or a pre-release such as "
+        "'v1.2.3a1' / 'v1.2.3rc1', all of which derive correctly."
+    )
+    if parsed.dev is not None:
+        # The output would be well-formed and correctly ordered, and about
+        # the wrong release. That is worse than malformed: nothing downstream
+        # rejects it.
+        toward = _render(parsed._replace(dev=None))
+        would_give = _render(_bump(parsed)._replace(dev=None))
         raise VersionError(
             f"the nearest tag is {tag!r}, which cannot be the base of a "
             "derived version.\n"
-            "A tag carrying a '.dev' segment would give a version with two of "
-            "them (not a valid PEP 440 version), and one carrying a local "
-            "'+' segment would put the commit distance inside the local part, "
-            "where it orders nothing and where PyPI will not accept it.\n"
-            "Tag a release instead -- 'v1.2.3', or a pre-release such as "
-            "'v1.2.3a1' / 'v1.2.3rc1', all of which derive correctly."
+            f"Its '.dev' segment already means \"on the way to {toward}\", "
+            "and there is no rung beneath it to bump -- so deriving from it "
+            "bumps the segment ABOVE it instead, giving "
+            f"{would_give}.dev<distance> and silently skipping the {toward} "
+            "the tag was working toward.\n"
+            f"{_tag_help}"
+        )
+    if parsed.local is not None:
+        raise VersionError(
+            f"the nearest tag is {tag!r}, which cannot be the base of a "
+            "derived version.\n"
+            "Every version derived from it would inherit the local '+' "
+            "segment, and a package index will not accept one -- so the "
+            "derived version could never be published, which is what it is "
+            "derived for.\n"
+            f"{_tag_help}"
         )
 
     return _Described(tag=parsed, distance=distance)
