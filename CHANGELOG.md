@@ -1,5 +1,26 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- **Re-vendored `standard.mk` to pick up `INSTALL_DEPS_CMD`
+    (just-buildit.github.io#37).** The two-line `install-deps` recipe becomes
+    `$(INSTALL_DEPS_CMD)`, backed by a canned recipe whose default is the
+    previous fetch verbatim. This repo sets no override, so it takes the
+    default and nothing about `make install-deps` changes here.
+
+    The hook exists for the repo that OWNS the script the target fetches:
+    just-bashit runs `src/just_bashit/install-deps.sh` in CI while
+    `make install-deps` ran the *published* copy, so one step had two
+    execution homes and the source under development was never the thing
+    exercised locally. Overriding the command is the fix; a private copy of
+    the target would be the same drift in a different file.
+
+    Fetched with `make standard-update` rather than a hand-run curl.
+    `scripts/release-watch.sh`, the other `VENDORED_FILES` entry, was
+    re-fetched and matched, so only `standard.mk` moved.
+
 ## [0.4.0] — 2026-09-09
 
 ### Added
