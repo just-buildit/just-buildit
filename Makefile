@@ -52,9 +52,22 @@ SYNC_CMD   = $(UV) sync --group dev
 # ci.yml passed `--with pip --with numpy` and this file did not, so `make test`
 # could not pass while CI was green.
 TEST_PYTHON ?=
-_TEST_RUN     = $(UV) run --no-project \
+# `env -u VIRTUAL_ENV` is load-bearing, not tidiness. `uv run --no-project`
+# still honours an ACTIVE virtualenv, so `make test` run from an activated
+# shell tests against whatever that shell happens to have installed, while CI
+# runs against this line alone. That is not a hypothetical: the `packaging`
+# import in the version-ordering tests was undeclared here and passed locally
+# for exactly that reason, then failed on all 24 CI legs. Unsetting it makes
+# the local command the same command CI runs, which is the only way this file
+# can be the SSOT it claims to be.
+#
+# Every import the suite makes therefore has to be named below.
+# `packaging` is the PEP 440 oracle the derived-version tests judge ordering
+# and canonical form with -- deliberately an independent implementation, since
+# a reference taken from the code under test cannot contradict it.
+_TEST_RUN     = env -u VIRTUAL_ENV $(UV) run --no-project \
                     $(if $(TEST_PYTHON),-p $(TEST_PYTHON),) \
-                    --with pip --with numpy python
+                    --with pip --with numpy --with packaging python
 # Registration-free, and deliberately so. This was a hand-maintained list of
 # module names, which is the same second copy the comment above is about: a new
 # `tests/test_*.py` was simply never run, in `make test` or in CI, and nothing

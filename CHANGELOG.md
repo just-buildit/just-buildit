@@ -59,6 +59,13 @@
     `_TEST_EXCLUDE`; `test_pypi` is the one, because it exercises the
     published package and so tests the last release rather than the branch.
 
+- **`make test` no longer inherits the shell's virtualenv.** `uv run   --no-project` still honours an ACTIVE virtualenv, so the target tested
+    against whatever the developer happened to have installed while CI tested
+    against the Makefile line alone -- the same command giving two answers. An
+    undeclared `packaging` import passed locally for exactly that reason and
+    then failed on all 24 CI legs. The runner now unsets `VIRTUAL_ENV` and
+    declares `packaging`, so the local command is the command CI runs.
+
 ## [0.3.12] — 2026-09-02
 
 ### Fixed
