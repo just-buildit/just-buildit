@@ -117,6 +117,23 @@ removed, from the same parse of the same tag.
 The answer does not change as commits land — only how far along the dev
 builds are — so it is stable to read at any point in a release branch's life.
 
+!!! warning "Inside a pre-release phase, it stays there"
+
+    `_bump` climbs to the first rung that applies — the pre-release number
+    before the release component — so once you are past `v1.1.4a1` the answer
+    is `1.1.4a2`, and after `v1.1.4a2` it is `1.1.4a3`. It will **never**
+    propose `1.1.4`.
+
+    That is the same judgement `version-from` never makes for you, seen from
+    the other side: the scheme does not invent a pre-release phase, and it
+    does not leave one either. Deciding "the alphas are done, ship it" is
+    yours, and you record it by tagging `v1.1.4` directly.
+
+    So a release job must not tag `v$(just-buildit --next-version)`
+    unconditionally while in a pre-release phase — it would cut `a2`, `a3`,
+    `a4` forever. Use the query for the routine case, and tag the promotion
+    by hand.
+
 It **refuses** rather than guesses in the two cases where there is no answer:
 
 - **A literal `[project] version`.** There is no derivation scheme to report,

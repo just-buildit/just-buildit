@@ -72,6 +72,33 @@ class TestTheAnswer(unittest.TestCase):
             _git(root, "tag", "v1.1.3-rc1")
             self.assertEqual(_next(root), "1.1.3rc2")
 
+    def test_it_never_leaves_a_pre_release_phase(self) -> None:
+        """The documented caveat, gated.
+
+        `_bump` climbs to the FIRST rung that applies, so inside an alpha the
+        answer is the next alpha, for ever. It will not propose `1.1.4`.
+
+        That is deliberate -- deciding "the alphas are done, ship it" is a
+        judgement, the same one `version-from` never makes -- but it is the
+        sharp edge for a release job, which must not tag this answer
+        unconditionally or it cuts a2, a3, a4 and never releases. Gated
+        because a caveat that lives only in prose is one refactor from being
+        quietly false.
+        """
+        with TemporaryDirectory() as tmp:
+            root = _repo(Path(tmp))
+            _git(root, "tag", "-d", "v1.1.3")
+            for tag, expected in (
+                ("v1.1.4a1", "1.1.4a2"),
+                ("v1.1.4a2", "1.1.4a3"),
+                ("v1.1.4rc1", "1.1.4rc2"),
+            ):
+                with self.subTest(tag=tag):
+                    _git(root, "tag", tag)
+                    self.assertEqual(_next(root), expected)
+                    self.assertNotEqual(_next(root), "1.1.4")
+                    _git(root, "tag", "-d", tag)
+
     def test_the_tags_spelling_is_an_input_not_the_output(self) -> None:
         """`v1.1.3ALPHA2` is `1.1.3a2`, so the next one is canonical too --
         this string becomes a tag and then a wheel filename."""
