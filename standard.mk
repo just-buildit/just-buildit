@@ -1017,7 +1017,7 @@ _STD_SECTION = case "$$t" in \
     all|help|setup|clean|test|test-fast|lint|format|install-deps) \
         tsec="Core";; \
     lint-*) tsec="Lint";; \
-    test-all|gates|gates-check) tsec="Aggregates";; \
+    test-all|gates|gates-check|gates-home-check) tsec="Aggregates";; \
     build|debug|release|pyext|compile-commands|tidy) tsec="C";; \
     wheel|test-python) tsec="Python";; \
     test-rust) tsec="Rust";; \
@@ -1147,6 +1147,20 @@ standard-check: ## Verify every vendored file matches canonical
 # The case that DOES happen is the reverse: a rule gets added without being
 # named in STD_TARGETS/LOCAL_TARGETS, so `help` silently omits it. Whether the
 # targets `help` lists actually do anything is ghost-check's job.
+#
+# The THIRD direction is the section menu. `gates-home-check` was added to
+# STD_TARGETS and given a recipe and a description, and every check above
+# passed -- it is a real target, it is documented, and help lists it. It was
+# listed under "Local", because _STD_SECTION never got a matching arm and the
+# fallthrough is Local by design. So the standard shipped a shared target that
+# every adopter's `make help` advertised as repo-specific, which is precisely
+# backwards: just-makeit's own CLAUDE.md tells readers that `make help`'s Local
+# section is the authoritative answer to which targets are that repo's alone.
+#
+# One direction only. A menu arm with no STD_TARGETS member is NOT an error --
+# most arms name feature-gated targets (`build`, `test-rust`, `doxygen`) that a
+# repo with that HAS_* flag off never defines, so the reverse check would fire
+# in almost every repo for nothing.
 help-check: ## Verify help documents every target, and every target is listed
 	@rc=0; \
 	 db=$$($(_STD_TMP)); trap 'rm -f "$$db"' EXIT; \
@@ -1157,6 +1171,18 @@ help-check: ## Verify help documents every target, and every target is listed
 	         echo "ERROR: '$$t' has no '## description', so help omits it"; \
 	         rc=1; \
 	     fi; \
+	 done; \
+	 nsec=0; \
+	 for t in $(STD_TARGETS); do \
+	     $(_STD_SECTION); \
+	     if [ "$$tsec" = "Local" ]; then \
+	         echo "ERROR: '$$t' is a STANDARD target, but help files it under"; \
+	         echo "  Local. A shared target advertised as repo-local is the"; \
+	         echo "  drift this file exists to prevent, and it is how a repo"; \
+	         echo "  comes to believe it owns something it merely vendors."; \
+	         echo "  Give it an arm in _STD_SECTION, beside its siblings."; \
+	         rc=1; \
+	     else nsec=$$((nsec + 1)); fi; \
 	 done; \
 	 withrecipe=$$(awk '/^[a-zA-Z0-9_.-]+:/ { n = $$0; sub(/:.*/, "", n); \
 	                                          b = 1; r = 0; next } \
@@ -1177,7 +1203,8 @@ help-check: ## Verify help documents every target, and every target is listed
 	     rc=1; \
 	 done; \
 	 if [ $$rc -eq 0 ]; then \
-	     echo "help-check: $(words $(ALL_TARGETS)) targets documented"; \
+	     echo "help-check: $(words $(ALL_TARGETS)) targets documented,"\
+	          "$$nsec standard target(s) filed"; \
 	 fi; \
 	 exit $$rc
 

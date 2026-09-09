@@ -21,6 +21,24 @@
     `scripts/release-watch.sh`, the other `VENDORED_FILES` entry, was
     re-fetched and matched, so only `standard.mk` moved.
 
+- **`make help` files every standard target, and a gate says so
+    (just-buildit.github.io#38).** `gates-home-check` was in `STD_TARGETS`
+    with a recipe and a description, and every gate passed -- yet `help`
+    listed it under **Local**, because `_STD_SECTION` had no matching arm and
+    the fallthrough is Local by design. The standard was advertising a shared
+    target as repo-specific.
+
+    Upstream fixed both halves: the target joins the Aggregates arm beside
+    `gates` and `gates-check`, and `help-check` gained a third direction --
+    every `STD_TARGETS` member must resolve to a section other than Local.
+    Registration-free, so a future standard target added without a menu arm
+    fails here on the next `make lint` with no list to maintain.
+
+    Visible here as `gates-home-check` moving from Local to Aggregates in
+    `make help`. The `help-check` success line gained a second count, the
+    number of standard targets it filed, so the added half cannot pass by
+    staying silent.
+
 ## [0.4.0] — 2026-09-09
 
 ### Added
