@@ -271,12 +271,25 @@ def _bump(version: _Version) -> _Version:
     return version._replace(release=release)
 
 
-def _from_git(project_root: Path) -> str | None:
-    """``git describe`` turned into a PEP 440 version, or None.
+class _Described(NamedTuple):
+    """A `git describe` reading: the parsed tag, and the distance from it."""
+
+    tag: _Version
+    distance: int
+
+
+def _describe(project_root: Path) -> _Described | None:
+    """Return the nearest ``v*`` tag, parsed, and the distance from it.
 
     None means "no answer from git" — not a repository, git not installed, or
     no matching tag. The caller turns that into the error, because only it
-    knows that `PKG-INFO` did not answer either.
+    knows what else it already tried.
+
+    Split out from `_from_git` so that the build's version and
+    `next_version`'s answer come from ONE parse of one tag. They are two
+    readings of the same fact -- ``1.1.4.dev5`` and ``1.1.4`` -- and a second
+    describe-and-validate path is exactly where they would drift into
+    disagreeing about which tag is nearest or whether it is usable.
     """
     described = _git(
         project_root, "describe", "--tags", "--long", "--match", _TAG_GLOB
@@ -312,17 +325,49 @@ def _from_git(project_root: Path) -> str | None:
             "'v1.2.3a1' / 'v1.2.3rc1', all of which derive correctly."
         )
 
+    return _Described(tag=parsed, distance=distance)
+
+
+def _from_git(project_root: Path) -> str | None:
+    """``git describe`` turned into a PEP 440 version, or None."""
+    described = _describe(project_root)
+    if described is None:
+        return None
     # Canonical either way: the tag's own spelling is an input, never the
     # output. `v1.1.3-rc1` and `v1.1.3ALPHA2` are the same versions as
     # `1.1.3rc1` and `1.1.3a2`, and emitting them verbatim put a
     # non-canonical string into the wheel FILENAME.
-    if distance == 0:
-        return _render(parsed)
+    if described.distance == 0:
+        return _render(described.tag)
     # Commits PAST a tag are work toward the NEXT release, so the version they
     # carry must name that one. Appending `.dev` to the tag itself named the
     # release already made, inverting the meaning of the segment and sorting
     # the build below the tag it came after. See `_bump`.
-    return _render(_bump(parsed)._replace(dev=distance))
+    return _render(_bump(described.tag)._replace(dev=described.distance))
+
+
+def _require_source(source: str | None) -> None:
+    """Raise unless *source* is a `version-from` this tool implements.
+
+    Shared by `resolve` and `next_version` rather than written twice: they ask
+    the same question of the same key, and a project told to fix its
+    `version-from` should read the same sentence whichever one it hit.
+    """
+    if source is None:
+        raise VersionError(
+            "[project] dynamic lists 'version', but "
+            "[tool.just-buildit] version-from is not set, so there is "
+            "nothing to derive it from.\n"
+            f'Add:\n\n    [tool.just-buildit]\n    version-from = "{VCS}"\n\n'
+            "or give [project] a literal version and drop 'version' from "
+            "dynamic."
+        )
+    if source != VCS:
+        raise VersionError(
+            f"[tool.just-buildit] version-from = {source!r} is not a source "
+            f"just-buildit knows. The only supported value is {VCS!r} "
+            "(nearest v* git tag, falling back to a sdist's PKG-INFO)."
+        )
 
 
 def resolve(project_root: Path, source: str | None) -> str:
@@ -359,21 +404,7 @@ def resolve(project_root: Path, source: str | None) -> str:
         > print(resolve(Path('.'), 'vcs'))"
         1.1.4.dev5
     """
-    if source is None:
-        raise VersionError(
-            "[project] dynamic lists 'version', but "
-            "[tool.just-buildit] version-from is not set, so there is "
-            "nothing to derive it from.\n"
-            f'Add:\n\n    [tool.just-buildit]\n    version-from = "{VCS}"\n\n'
-            "or give [project] a literal version and drop 'version' from "
-            "dynamic."
-        )
-    if source != VCS:
-        raise VersionError(
-            f"[tool.just-buildit] version-from = {source!r} is not a source "
-            f"just-buildit knows. The only supported value is {VCS!r} "
-            "(nearest v* git tag, falling back to a sdist's PKG-INFO)."
-        )
+    _require_source(source)
 
     from_sdist = _from_pkg_info(project_root)
     if from_sdist is not None:
@@ -393,3 +424,95 @@ def resolve(project_root: Path, source: str | None) -> str:
         "Tag a release (`git tag v0.1.0`), or give [project] a literal "
         "version and drop 'version' from dynamic."
     )
+
+
+def next_version(project_root: Path, source: str | None) -> str:
+    """Return the version the next release from *project_root* would carry.
+
+    This invents no policy. A dev build five commits past ``v1.1.3`` is
+    already called ``1.1.4.dev5`` — the ``.devN`` segment means "on the way
+    to", so the build is *already* naming 1.1.4 as the next release. This
+    reports that same number with the ``.devN`` removed, from the same parse
+    of the same tag (`_describe`). It is the question a release job asks:
+    **what tag should I push to release what is on this branch.**
+
+    Why it exists
+    -------------
+    A project with ``dynamic = ["version"]`` has removed the version from
+    every tracked file — that is the point of gh-28. The consequence is that
+    CI has nothing to read it out of: no ``[project] version`` to grep, and a
+    ``VERSION_PROBES``-style check has no file to probe. Without a query, a
+    release job's only options are to re-implement `git describe` parsing in
+    shell, or to reintroduce the carrier the dynamic version deleted.
+
+    Deliberately not the same as `resolve`
+    --------------------------------------
+    `resolve` answers "what version is THIS tree", and consults ``PKG-INFO``
+    first so an unpacked sdist reports its own identity. This answers "what
+    comes NEXT", which is a question about a repository's history, so it does
+    not look at ``PKG-INFO`` at all: an sdist has no tags and no future, and
+    reporting one from a stale ``PKG-INFO`` would be a guess wearing an
+    answer's clothes.
+
+    On the tag or past it, the answer is the same -- the release being worked
+    toward does not change when the first commit after a tag lands:
+
+    ===========================  ==============
+    git state                    next-version
+    ===========================  ==============
+    exactly on tag ``v1.1.3``    ``1.1.4``
+    5 commits past ``v1.1.3``    ``1.1.4``
+    exactly on ``v1.1.3rc1``     ``1.1.3rc2``
+    5 commits past ``v1.1.3rc1`` ``1.1.3rc2``
+    ===========================  ==============
+
+    Parameters
+    ----------
+    project_root : Path
+        The directory holding ``pyproject.toml``.
+    source : str or None
+        ``[tool.just-buildit] version-from``. Required, and for the same
+        reason `resolve` requires it: a project carrying a literal version has
+        no derivation scheme, and which digit its next release bumps is a
+        decision no tool can read off the repository.
+
+    Returns
+    -------
+    str
+        A concrete PEP 440 version, in canonical form, with no ``.dev``
+        segment.
+
+    Raises
+    ------
+    VersionError
+        If no source is declared, the source is unrecognised, or git gives no
+        usable tag to bump.
+
+    Examples
+    --------
+    From a checkout sitting five commits past ``v1.1.3``::
+
+        $ just-buildit --next-version
+        1.1.4
+
+    Which is the release that checkout's builds already name::
+
+        $ just-buildit inspect | grep version:
+          version:         1.1.4.dev5
+    """
+    _require_source(source)
+
+    described = _describe(project_root)
+    if described is None:
+        raise VersionError(
+            "the next version could not be determined: "
+            f"`git describe --tags --match '{_TAG_GLOB}'` gave no answer "
+            "(not a git checkout, git not installed, or no matching tag "
+            "yet).\n"
+            "There is no next release to name until there is a first one: "
+            "tag it (`git tag v0.1.0`).\n"
+            "Note that an unpacked sdist is never an answer here -- "
+            "'what comes next' is a question about a repository's history, "
+            "not about an artifact's PKG-INFO."
+        )
+    return _render(_bump(described.tag))

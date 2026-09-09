@@ -2,6 +2,35 @@
 
 ## [Unreleased]
 
+### Added
+
+- **`just-buildit --next-version` prints the version the next release would
+    carry (#34).** Deriving the version removes it from every tracked file,
+    which is the point of #28 -- and the reason CI then has nothing to read it
+    out of: no `[project] version` to grep, no file for a version check to
+    probe. A release job's only options were to re-implement `git describe`
+    parsing in shell, free to disagree with the wheel the build produces, or
+    to reintroduce the carrier the dynamic version had just deleted.
+
+    It invents no policy, and that is the argument for it. A build five
+    commits past `v1.1.3` is already called `1.1.4.dev5`, and `.devN` means
+    "on the way to" -- so that build already names 1.1.4 as the next release.
+    The query reports the same number with the `.devN` removed, from the same
+    parse of the same tag: `_describe` was split out of `_from_git` so the two
+    readings cannot drift into disagreeing about which tag is nearest or
+    whether it is usable. A test asserts the equality directly.
+
+    Bare on stdout, so `VERSION=$(just-buildit --next-version)` works, with
+    every diagnostic on stderr and a non-zero exit -- a failed query must not
+    be capturable and pushable as a tag.
+
+    It refuses rather than guesses in the two cases with no answer: a literal
+    `[project] version` (which digit a release bumps is a judgement, not a
+    fact about the repository) and a repository with no tag yet. Deliberately
+    asymmetric with the build's own version, which consults a sibling
+    `PKG-INFO` first: "what comes next" is a question about a repository's
+    history, and an sdist has neither tags nor a future.
+
 ### Changed
 
 - **Re-vendored `standard.mk` to pick up `INSTALL_DEPS_CMD`

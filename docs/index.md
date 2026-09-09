@@ -64,6 +64,10 @@ Need a project scaffold? [just-makeit](https://github.com/just-buildit/just-make
 uvx just-buildit inspect   # dry-run: show config and what would be built
 uvx just-buildit build     # build wheel into dist/
 uvx just-buildit sdist     # build source distribution into dist/
+
+# For a project deriving its version from git tags, the number CI cannot
+# read out of a file, because there is no longer a file carrying it:
+uvx just-buildit --next-version   # -> 1.1.4  (the tag a release would push)
 ```
 
 ______________________________________________________________________

@@ -15,7 +15,11 @@ Commands:
   help           Show this message
 
 Options:
-  -V, --version  Print version and exit
+  -V, --version  Print just-buildit's own version and exit
+
+Queries (about the project in the current directory):
+  --next-version  Print the version its next release would carry, for a
+                  project that derives its version from git tags
 """
 
 
@@ -27,6 +31,8 @@ def main() -> None:
         from just_buildit import __version__
 
         print(__version__)
+    elif args[0] == "--next-version":
+        _next_version()
     elif args[0] == "inspect":
         _inspect()
     elif args[0] == "build":
@@ -36,6 +42,25 @@ def main() -> None:
     else:
         print(f"just-buildit: unknown command '{args[0]}'", file=sys.stderr)
         print("Run 'just-buildit help' for usage.", file=sys.stderr)
+        sys.exit(1)
+
+
+def _next_version() -> None:
+    """Print the version the next release would carry, and nothing else.
+
+    Bare on stdout, because the caller is a release job doing
+    ``VERSION=$(just-buildit --next-version)``. Every diagnostic goes to
+    stderr with a non-zero exit, so a failure can never be captured and
+    pushed as a tag.
+    """
+    from . import _meta
+    from ._version import VersionError, next_version
+
+    project_root = Path.cwd()
+    try:
+        print(next_version(project_root, _meta.version_source(project_root)))
+    except (FileNotFoundError, ValueError, VersionError) as e:
+        print(f"error: {e}", file=sys.stderr)
         sys.exit(1)
 
 

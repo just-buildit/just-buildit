@@ -82,6 +82,54 @@ that sdist agrees with it without needing a repository that is no longer there.
 It also stops an sdist unpacked inside an unrelated checkout from picking up
 that checkout's tags.
 
+### Asking for the next version
+
+Deriving the version removes it from every tracked file, which is the point —
+and the reason CI then has nothing to read it out of. There is no
+`[project] version` to grep and no file for a version check to probe, so a
+release job needs a way to ask:
+
+```bash
+just-buildit --next-version      # -> 1.1.4
+```
+
+It prints the version the **next release** would carry, and nothing else, so
+it can be captured directly:
+
+```bash
+VERSION=$(just-buildit --next-version)
+git tag "v$VERSION" && git push origin "v$VERSION"
+```
+
+This invents no policy. A build five commits past `v1.1.3` is already called
+`1.1.4.dev5`, and `.devN` means "on the way to" — so that build already names
+1.1.4 as the next release. The query reports the same number with the `.devN`
+removed, from the same parse of the same tag.
+
+| git state                  | build version   | `--next-version` |
+| -------------------------- | --------------- | ---------------- |
+| exactly on tag `v1.1.3`    | `1.1.3`         | `1.1.4`          |
+| 1 commit past it           | `1.1.4.dev1`    | `1.1.4`          |
+| 5 commits past it          | `1.1.4.dev5`    | `1.1.4`          |
+| exactly on `v1.1.3rc1`     | `1.1.3rc1`      | `1.1.3rc2`       |
+| 3 commits past `v1.1.3rc1` | `1.1.3rc2.dev3` | `1.1.3rc2`       |
+
+The answer does not change as commits land — only how far along the dev
+builds are — so it is stable to read at any point in a release branch's life.
+
+It **refuses** rather than guesses in the two cases where there is no answer:
+
+- **A literal `[project] version`.** There is no derivation scheme to report,
+    and which digit the next release bumps is a judgement, not a fact about
+    the repository — the same judgement `version-from` never makes for you.
+- **No tag yet.** There is no next release to name until there is a first
+    one. Unlike the build's own version, this deliberately does *not* fall
+    back to a sibling `PKG-INFO`: "what comes next" is a question about a
+    repository's history, and an sdist has neither tags nor a future.
+
+Every diagnostic goes to stderr with a non-zero exit, so a failed query can
+never be captured and pushed as a tag.
+
 ### Reaching an alpha, beta or release candidate
 
 You **tag** it. The scheme derives; it never invents a pre-release phase,
