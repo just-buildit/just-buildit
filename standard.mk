@@ -745,6 +745,13 @@ RELEASE_WATCH_CMD ?=
 # string. `version-check` requires every probe to agree — and to equal
 # VERSION= when one is given. Exported so the recipe's shell can read it.
 VERSION_PROBES ?=
+
+# The aggregate check a release commit must not have FAILED, read by
+# `tag-release`. Named rather than hard-coded because it is a workflow's job
+# name: a repo that calls its aggregator something else gets the check
+# skipped, not a spurious refusal.
+CI_CHECK_NAME ?= CI passed
+
 export VERSION_PROBES
 # Extra guidance echoed after `release-branch`, repo-specific by nature.
 RELEASE_BRANCH_NOTES ?=
@@ -887,6 +894,45 @@ endif
 # An existing tag on a DIFFERENT commit is still refused. That is the case
 # worth failing on: the artifacts were built from wherever the tag pointed when
 # the workflow ran, so moving it makes the tag disagree with what was published.
+# Refuse to tag a commit whose CI has already FAILED.
+#
+# `tag-release` checked everything about the TAG -- on main, in sync with
+# origin, versions agreeing, not moving an existing tag -- and nothing about
+# the tree it points at. A release tag must not move (see below), so a tag
+# pushed onto a known-red commit cannot be walked back: the only way out is
+# to burn a version number.
+#
+# ADVISORY when CI has not concluded, deliberately. Tagging ahead of CI is
+# legitimate and is now the normal flow: a bump-only release commit skips the
+# matrix and has nothing that can fail, and `release.yml`'s verify job waits
+# for the result either way and refuses to publish a tree CI did not certify.
+# So the cost of tagging early and being wrong is one pre-publish rerun, not
+# a bad publish -- not a reason to block.
+#
+# FAIL-OPEN on everything else. No `gh`, no auth, no such check, an API that
+# does not answer: the check is skipped and the release proceeds. A release
+# must not become un-cuttable because a convenience check could not run, and
+# the publish-side gate is the one that actually protects users.
+# >>> ci-guard (extracted verbatim by ci.yml — keep the markers)
+	@if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then \
+	    slug=$$(gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null); \
+	    if [ -n "$$slug" ]; then \
+	        concl=$$(gh api --paginate "repos/$$slug/commits/$$(git rev-parse HEAD)/check-runs" \
+	            --jq '[.check_runs[]|select(.name=="$(CI_CHECK_NAME)")][0]|select(.status=="completed")|.conclusion' \
+	            2>/dev/null | head -n1); \
+	        case "$$concl" in \
+	            failure|timed_out|cancelled|action_required) \
+	                echo "ERROR: '$(CI_CHECK_NAME)' concluded '$$concl' for HEAD."; \
+	                echo "  A release tag must not move, so tagging this commit"; \
+	                echo "  spends a version number. Fix main and cut the next one."; \
+	                exit 1 ;; \
+	            success) ;; \
+	            *) echo "tag-release: '$(CI_CHECK_NAME)' has not concluded for HEAD" \
+	                    "— tagging ahead of it; the release will wait for it." ;; \
+	        esac; \
+	    fi; \
+	fi
+# <<< ci-guard
 	@if git rev-parse -q --verify "refs/tags/v$(VERSION)" >/dev/null 2>&1; then \
 	    test "$$(git rev-parse "v$(VERSION)^{commit}")" = "$$(git rev-parse HEAD)" || \
 	        { echo "ERROR: v$(VERSION) exists and points at another commit."; \
