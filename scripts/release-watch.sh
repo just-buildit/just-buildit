@@ -212,7 +212,23 @@ while true; do
           echo "  CI is green — rerunning the release run…"
         fi
       fi
-      echo "  run failed before publish (likely a flake) — rerunning failed jobs once…"
+      # NAME the jobs instead of guessing at a cause. This printed
+      # "likely a flake" unconditionally — including for the verify-ci case
+      # diagnosed immediately above, which is deterministic and was the
+      # cause every time it appeared (just-makeit#1327: the verify job's
+      # poll window was shorter than main's CI, so the first attempt timed
+      # out on every release cut straight after a merge).
+      #
+      # A diagnosis we already have beats a guess we print, and "flake" is
+      # the one word that stops the next reader looking — it is also what
+      # made a deterministic, reproducible failure read as noise for three
+      # releases.
+      FAILED_JOBS=$(echo "$J" | jq -r '[.jobs[]
+          | select(.conclusion=="failure") | .name] | join(", ")' \
+          2>/dev/null)
+      echo "  run failed before publish — rerunning once (one recovery," \
+           "then it stops)."
+      echo "  failed: ${FAILED_JOBS:-<could not read job list>}"
       gh run rerun "$RUN" -R "$REPO" --failed >/dev/null 2>&1 || true
       RETRIED=1; sleep 20; continue
     fi
