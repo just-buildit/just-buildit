@@ -737,7 +737,7 @@ endif
 # two in one go. `release` is NOT part of this — it is the C build type.
 ifeq ($(HAS_RELEASE),1)
 STD_TARGETS += bump-version version-check release-branch tag-release \
-               release-watch ship
+               release-watch ship ci-changes
 
 BUMP_VERSION_CMD  ?=
 RELEASE_WATCH_CMD ?=
@@ -848,6 +848,64 @@ version-check: ## [VERSION=x.y.z] Verify version strings agree
 	     first=$$got; firstlabel=$$label; \
 	 done
 	@echo "Version OK"
+
+# Is HEAD, against BASE, a version bump and nothing else? A release commit
+# changes a version string in a handful of manifests and a lockfile or two,
+# and the full CI matrix then re-tests code its parent commit already passed:
+# just-makeit measured a bump at 15m13s on main against 2m22s as a PR, for
+# identical content, on every release. A workflow's `changes` job runs this
+# and gates the matrix on its `src`; `CI passed` treats src=false as green.
+#
+# The rule is a SUBSTITUTION, not a list of files: every changed path, other
+# than prose matching CI_INERT_RE, must equal its BASE copy with the old
+# version string replaced by the new one. So a new version site needs no
+# declaration, and anything else -- a dependency moving in a lockfile, a
+# second edit in a manifest, an added or deleted file -- fails the
+# comparison and runs everything. The versions come from the first of the
+# repo's own VERSION_PROBES, run in HEAD and in an export of BASE.
+#
+# Fail-safe in every direction: an unreadable BASE, a probe that prints
+# nothing, no version change, an empty diff -- each answers src=true. The
+# worst this can do wrong is run a matrix that was not needed.
+#
+# Prints `src=true|false` and appends it to $GITHUB_OUTPUT when set; the
+# reason goes to stderr. BASE defaults to HEAD^ (a PR's merge commit, or a
+# single pushed commit); a workflow passes the pushed range's `before`.
+CI_INERT_RE ?= ^(CHANGELOG\.md|changelog\.d/.+)$$
+
+ci-changes: ## [BASE=<rev>] src=false when HEAD is only a version bump over BASE
+	@base="$${BASE:-HEAD^}"; \
+	 say() { echo "src=$$1"; \
+	         if [ -n "$$GITHUB_OUTPUT" ]; then echo "src=$$1" >> "$$GITHUB_OUTPUT"; fi; \
+	         echo "ci-changes: $$2" >&2; exit 0; }; \
+	 git rev-parse -q --verify "$$base^{commit}" >/dev/null \
+	     || say true "base $$base is not in this clone -- cannot prove a bump"; \
+	 probe=$$(printf '%s\n' "$$VERSION_PROBES" | grep -v '^[[:space:]]*$$' \
+	          | head -n1 | cut -d'|' -f2-); \
+	 [ -n "$$probe" ] || say true "no VERSION_PROBES to read a version with"; \
+	 new=$$(eval "$$probe" 2>/dev/null); \
+	 tmp=$$(mktemp -d); trap 'rm -rf "$$tmp"' EXIT; \
+	 mkdir "$$tmp/base"; \
+	 git archive "$$base" | tar -x -C "$$tmp/base"; \
+	 old=$$(cd "$$tmp/base" && eval "$$probe" 2>/dev/null); \
+	 [ -n "$$old" ] && [ -n "$$new" ] \
+	     || say true "could not read the version at $$base or HEAD"; \
+	 [ "$$old" != "$$new" ] || say true "version unchanged ($$new)"; \
+	 files=$$(git diff --name-only "$$base" HEAD); \
+	 [ -n "$$files" ] || say true "no changes"; \
+	 pat=$$(printf '%s' "$$old" | sed 's/[].[\*^$$/]/\\&/g'); \
+	 n=0; \
+	 for f in $$files; do \
+	     if printf '%s\n' "$$f" | grep -Eq '$(CI_INERT_RE)'; then continue; fi; \
+	     git cat-file -e "$$base:$$f" 2>/dev/null && git cat-file -e "HEAD:$$f" 2>/dev/null \
+	         || say true "$$f was added or removed"; \
+	     git show "$$base:$$f" | sed "s/$$pat/$$new/g" > "$$tmp/want"; \
+	     git show "HEAD:$$f" > "$$tmp/got"; \
+	     cmp -s "$$tmp/want" "$$tmp/got" \
+	         || say true "$$f changes more than the version string"; \
+	     n=$$((n + 1)); \
+	 done; \
+	 say false "a version bump alone ($$old -> $$new, $$n manifest(s)); the matrix can skip"
 
 # The explicit origin/main start point matters: a bare `checkout -b` forks from
 # whatever HEAD the invoker happens to be on (a feature branch, a stale main),
