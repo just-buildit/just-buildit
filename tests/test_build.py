@@ -366,7 +366,13 @@ class TestBuildEnv(unittest.TestCase):
     def test_python_link_flags_windows_venv_finds_base_libs(self):
         """Inside a venv -- which every PEP 517 isolated build is -- the
         import library is under sys.base_prefix/libs, not next to the venv's
-        python.exe. Simulated, so it runs on every OS."""
+        python.exe. Simulated, so it runs on every OS.
+
+        Every directory the function searches is pointed into the temp tree,
+        including the stdlib's parent. Left real, it is the MSYS2 UCRT64
+        interpreter's own lib/, which holds libpython3.X.dll.a -- so on that
+        CI leg the MinGW branch won, correctly, and the test measured the
+        runner instead of the fix."""
         from unittest import mock
 
         with tempfile.TemporaryDirectory() as d:
@@ -384,6 +390,10 @@ class TestBuildEnv(unittest.TestCase):
                 self._build.sys, "base_prefix", str(base)
             ), mock.patch.object(
                 self._build.sysconfig, "get_config_var", return_value=None
+            ), mock.patch.object(
+                self._build.sysconfig,
+                "get_path",
+                return_value=str(base / "Lib"),
             ):
                 flags = self._build._python_link_flags()
         self.assertEqual(flags, [f"-L{base / 'libs'}", f"-l{lib}"])
