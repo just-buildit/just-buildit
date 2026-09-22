@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.6.1] — 2026-09-22
+
 ### Fixed
 
 - **A Windows wheel build finds Python's import library inside a venv.**
