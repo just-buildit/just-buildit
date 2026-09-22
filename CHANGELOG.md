@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **A Windows wheel build finds Python's import library inside a venv.**
+    `_python_link_flags` looked for `python3X.lib` under the directory of
+    `sys.executable`. A PEP 517 build runs in an isolated venv, whose
+    `python.exe` is in `<venv>/Scripts/`, so every `pip wheel` or `uv build`
+    on Windows failed with `Could not find Python 3.X import library`, even
+    on a stock python.org install. It now looks under `sys.base_prefix`
+    first, where CPython ships `libs/python3X.lib`. Found building
+    doppler's first Windows wheel.
+
 ## [0.6.0] — 2026-09-09
 
 ### Added
