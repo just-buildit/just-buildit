@@ -91,12 +91,20 @@ def _python_link_flags() -> list[str]:
             if (Path(d) / stem).exists():
                 return [f"-L{d}", f"-lpython{major}.{minor}"]
 
-    # Native Windows CPython: python3X.lib in <root>/libs/
-    libs_dir = install_root / "libs"
-    if (libs_dir / f"python{major}{minor}.lib").exists():
-        return [f"-L{libs_dir}", f"-lpython{major}{minor}"]
+    # Native Windows CPython: python3X.lib in <install root>/libs/. The
+    # install root is sys.base_prefix, NOT sys.executable's directory: a PEP
+    # 517 build runs in an isolated venv, whose python.exe sits in
+    # <venv>/Scripts/, so the executable's parent never holds libs/ -- which
+    # is every `pip wheel` / `uv build` on Windows. The executable's parent
+    # stays as a fallback for an interpreter run outside any venv.
+    libs_dirs = list(
+        dict.fromkeys([Path(sys.base_prefix) / "libs", install_root / "libs"])
+    )
+    for libs_dir in libs_dirs:
+        if (libs_dir / f"python{major}{minor}.lib").exists():
+            return [f"-L{libs_dir}", f"-lpython{major}{minor}"]
 
-    searched = [*list(candidates), str(libs_dir)]
+    searched = [*list(candidates), *map(str, libs_dirs)]
     raise RuntimeError(
         f"Could not find Python {major}.{minor} import library on "
         f"Windows.\n\n"

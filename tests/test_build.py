@@ -363,6 +363,31 @@ class TestBuildEnv(unittest.TestCase):
         ldflags = self._build._ldflags()
         self.assertFalse(any(f.startswith("-l") for f in ldflags))
 
+    def test_python_link_flags_windows_venv_finds_base_libs(self):
+        """Inside a venv -- which every PEP 517 isolated build is -- the
+        import library is under sys.base_prefix/libs, not next to the venv's
+        python.exe. Simulated, so it runs on every OS."""
+        from unittest import mock
+
+        with tempfile.TemporaryDirectory() as d:
+            base = Path(d) / "Python312"
+            (base / "libs").mkdir(parents=True)
+            lib = f"python{sys.version_info.major}{sys.version_info.minor}"
+            (base / "libs" / f"{lib}.lib").write_bytes(b"")
+            venv_exe = Path(d) / "venv" / "Scripts" / "python.exe"
+            venv_exe.parent.mkdir(parents=True)
+            with mock.patch.object(
+                self._build.platform, "system", return_value="Windows"
+            ), mock.patch.object(
+                self._build.sys, "executable", str(venv_exe)
+            ), mock.patch.object(
+                self._build.sys, "base_prefix", str(base)
+            ), mock.patch.object(
+                self._build.sysconfig, "get_config_var", return_value=None
+            ):
+                flags = self._build._python_link_flags()
+        self.assertEqual(flags, [f"-L{base / 'libs'}", f"-l{lib}"])
+
     def test_python_link_flags_non_windows(self):
         """On Linux/macOS symbols resolve at runtime — LIBS is empty."""
         if platform.system() == "Windows":
