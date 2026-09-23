@@ -43,7 +43,7 @@
 # all, so its targets do not exist and `help` does not list them):
 #
 #   HAS_C HAS_PYTHON HAS_RUST HAS_DOCS HAS_DOXYGEN HAS_BENCH HAS_COVERAGE
-#   HAS_RELEASE HAS_EXAMPLES
+#   HAS_RELEASE HAS_CHANGELOG HAS_EXAMPLES
 #
 # A command variable either has a universally correct default (`TEST_RUST_CMD`
 # is `cargo test`) or is REQUIRED once its flag is on — see "Required
@@ -755,6 +755,10 @@ CI_CHECK_NAME ?= CI passed
 export VERSION_PROBES
 # Extra guidance echoed after `release-branch`, repo-specific by nature.
 RELEASE_BRANCH_NOTES ?=
+# What `release-branch` does about the changelog: tell a human, unless
+# HAS_CHANGELOG (below) replaces both with the assembly itself.
+_std_release_changelog      =
+_std_release_changelog_note = @echo "  - edit CHANGELOG.md ([Unreleased] -> [$(VERSION)])"
 
 $(call _std_require,BUMP_VERSION_CMD,HAS_RELEASE)
 $(call _std_require,VERSION_PROBES,HAS_RELEASE)
@@ -919,9 +923,10 @@ endif
 	git fetch origin main
 	git checkout -b chore/release-$(VERSION) origin/main
 	@$(MAKE) bump-version VERSION=$(VERSION)
+	$(_std_release_changelog)
 	@echo ""
 	@echo "Now:"
-	@echo "  - edit CHANGELOG.md ([Unreleased] -> [$(VERSION)])"
+	$(_std_release_changelog_note)
 	$(RELEASE_BRANCH_NOTES)
 	@echo "  - git commit -am 'chore: release v$(VERSION)', push, open a PR"
 	@echo "  - merge once green, then: git checkout main && git pull &&"
@@ -1012,6 +1017,86 @@ endif
 	$(RELEASE_WATCH_CMD)
 
 ship: tag-release release-watch ## VERSION=x.y.z — tag-release then release-watch
+endif
+
+# ── HAS_CHANGELOG ────────────────────────────────────────────────────────────
+# An entry is a FILE, `changelog.d/<section>/<slug>.md`, promoted into
+# CHANGELOG.md once per release. Every open PR used to append to the top of
+# `[Unreleased]`, so each merge knocked every other open PR to CONFLICTING:
+# O(N^2) hand-resolutions, none about code, each restarting that PR's CI.
+# doppler measured it with twelve PRs in flight and built this; just-makeit
+# hit it with twenty in a day and adopted it from here rather than growing a
+# second copy (just-buildit.github.io#50).
+#
+# All the logic is ONE vendored script, `scripts/changelog.py`, so the three
+# questions below read the file with one parser. It is added to
+# VENDORED_FILES here rather than left for the repo to list: turning the flag
+# on is then all it takes to fetch it (`make standard-update`) and to hold it
+# to canonical (`standard-check`).
+#
+#   CHANGELOG_CODE_PATHS  REQUIRED. The paths whose change needs an entry
+#                         (`src native`); a docs-only branch needs none.
+#   CHANGELOG_BASE        what "this branch" is measured against. CI passes
+#                         the PR's base SHA and needs `fetch-depth: 0`.
+#   CHANGELOG_SECTIONS    the section directories, in published order.
+#                         `docs` is in the default because three of the four
+#                         adopters already publish a `### Docs`.
+ifeq ($(HAS_CHANGELOG),1)
+STD_TARGETS += changelog-check changelog-sections-check changelog-assemble \
+               changelog-assembled-check
+
+CHANGELOG_FILE       ?= CHANGELOG.md
+CHANGELOG_DIR        ?= changelog.d
+CHANGELOG_BASE       ?= origin/main
+CHANGELOG_CODE_PATHS ?=
+CHANGELOG_SECTIONS   ?= breaking added changed deprecated removed fixed \
+                        security docs
+CHANGELOG_PYTHON     ?= python3
+VENDORED_FILES       += scripts/changelog.py
+
+$(call _std_require,CHANGELOG_CODE_PATHS,HAS_CHANGELOG)
+
+_std_changelog = $(CHANGELOG_PYTHON) scripts/changelog.py \
+    --file $(CHANGELOG_FILE) --dir $(CHANGELOG_DIR) \
+    --sections "$(strip $(CHANGELOG_SECTIONS))"
+
+# Both branch gates run in `lint`, so the one CI job that runs `make lint`
+# enforces them and no workflow has to remember a second name.
+lint: changelog-check changelog-sections-check
+
+changelog-check: ## A branch that changes code adds a changelog.d/ fragment
+	@$(_std_changelog) check $(CHANGELOG_BASE) $(CHANGELOG_CODE_PATHS)
+
+# A released section is history. The one edit allowed is restoring a section
+# to what its v<version> tag shipped, which is how a misplaced entry is taken
+# back out. Comparing whole sections rather than diff hunks is what lets the
+# release branch rename [Unreleased] with no carve-out for its name.
+changelog-sections-check: ## A branch edits no released CHANGELOG section
+	@$(_std_changelog) sections $(CHANGELOG_BASE)
+
+# Stages what it did: the fragments are deleted in the worktree but still
+# tracked, so the next `make lint` would hand the formatter paths that no
+# longer exist and fail on a step that succeeded (doppler, cutting v0.44.0).
+changelog-assemble: ## [VERSION=x.y.z] Promote changelog.d/ fragments into CHANGELOG.md
+	@$(_std_changelog) assemble $(if $(VERSION),--version $(VERSION))
+	@git add -A $(CHANGELOG_DIR) $(CHANGELOG_FILE)
+
+# Not in `lint`: a feature branch legitimately carries fragments, so it would
+# be red on every PR. The one moment the question means anything is the
+# irreversible one, so it is a prerequisite of `tag-release` below. doppler,
+# before it had this: 62 fragments outstanding would have published 5 entries
+# out of 67.
+changelog-assembled-check: ## Fail while any changelog.d/ fragment is unassembled
+	@$(_std_changelog) assemble --check
+
+ifeq ($(HAS_RELEASE),1)
+tag-release: changelog-assembled-check
+# `release-branch` promotes the fragments into the new version's section
+# itself. Writing an entry is prose and stays prose; renaming a heading is a
+# hand step, and hand steps are the ones that rot (doppler#996).
+_std_release_changelog = @$(MAKE) --no-print-directory changelog-assemble VERSION=$(VERSION)
+_std_release_changelog_note = @echo "  - review CHANGELOG.md: changelog.d/ was promoted into [$(VERSION)]"
+endif
 endif
 
 # ── HAS_EXAMPLES ─────────────────────────────────────────────────────────────
@@ -1173,6 +1258,8 @@ _STD_SECTION = case "$$t" in \
     coverage|coverage-gate) tsec="Coverage";; \
     bump-version|version-check|release-branch|tag-release|release-watch \
         |ship|ci-changes) tsec="Release";; \
+    changelog-check|changelog-sections-check|changelog-assemble \
+        |changelog-assembled-check) tsec="Changelog";; \
     test-examples) tsec="Examples";; \
     standard-check|standard-update|help-check|ghost-check|hook-dispatch-check|hook-stage-check|tracked-paths-check) \
         tsec="Gates";; \
@@ -1180,7 +1267,7 @@ _STD_SECTION = case "$$t" in \
 esac
 
 _STD_SECTION_ORDER = Core Lint Aggregates C Python Rust Docs Doxygen Bench \
-                      Coverage Release Examples Gates Local
+                      Coverage Release Changelog Examples Gates Local
 
 # Drift. Fetches canonical EVERY time, with no cache: a cache would mean the
 # most likely failure — the fetch failing while the network is fine (CDN
