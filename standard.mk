@@ -43,7 +43,7 @@
 # all, so its targets do not exist and `help` does not list them):
 #
 #   HAS_C HAS_PYTHON HAS_RUST HAS_DOCS HAS_DOXYGEN HAS_BENCH HAS_COVERAGE
-#   HAS_RELEASE HAS_EXAMPLES
+#   HAS_RELEASE HAS_CHANGELOG HAS_EXAMPLES
 #
 # A command variable either has a universally correct default (`TEST_RUST_CMD`
 # is `cargo test`) or is REQUIRED once its flag is on — see "Required
@@ -91,6 +91,24 @@ STANDARD_URL  ?= https://just-buildit.github.io/standard.mk
 # checking one file against staging and the rest against production.
 VENDORED_FILES  ?=
 VENDOR_BASE_URL ?= $(dir $(STANDARD_URL))
+
+# Where vendored file $f is fetched from, as shell that sets `u`. ONE
+# derivation, used by both standard-update and standard-check, so the fetch
+# and the check cannot disagree about where a file lives.
+#
+# A path under `.github/` is served from `github/` (no dot): Pages publishes
+# dotfiles but never the `.github/` directory, and `.github/dependabot.yml`
+# is the one place Dependabot reads its config. So canonical publishes
+# `github/dependabot.yml`, and an adopter lists `.github/dependabot.yml`.
+#
+# The x prefix is load-bearing: an empty STANDARD_FILE expands the first
+# pattern to a bare ) and the shell dies on a syntax error. Quoted, so an
+# exact match rather than a glob.
+_std_vendor_src = case "x$$f" in \
+        "x$(STANDARD_FILE)") u="$(STANDARD_URL)" ;; \
+        x.github/*)          u="$(VENDOR_BASE_URL)github/$${f\#.github/}" ;; \
+        *)                   u="$(VENDOR_BASE_URL)$$f" ;; \
+    esac
 
 # ── Tooling ──────────────────────────────────────────────────────────────────
 # The ONLY place a tool binary is named. Versions live in pyproject.toml's dev
@@ -181,12 +199,26 @@ GATES_PROVISION ?= install-deps
 # not an exception to it.
 GATES_LOCAL_ONLY ?=
 
-# Targets CI runs that the scan cannot see for itself -- one driven from an
-# `env` expression, or run by a workflow other than GATES_CI_FILE. Naming them
-# is better than widening the scan into a guess: the check refuses to run at
-# all when it meets an interpolation it cannot resolve, so a repo is told
-# exactly what to add rather than handed a wrong answer.
+# Targets run by a workflow OTHER than GATES_CI_FILE -- a scheduled job, a
+# release workflow. Naming one here counts it as run by CI, so the name is
+# VERIFIED, not taken on trust: `gates-home-check` fails unless some workflow
+# under GATES_WORKFLOW_DIR runs `make <name>` on an uncommented line, read by
+# the same extractor (_STD_MAKE_RUNS) that reads GATES_CI_FILE. Before it was,
+# a deleted or renamed workflow left its target "covered" by the declaration
+# alone -- the reverse-direction gate satisfied by a list again (doppler#1716,
+# just-makeit#1768).
+#
+# A target driven from an `env` expression (`make $${{ env.T }}`) is NOT
+# something this variable takes: the scan resolves matrix arms only, and
+# an `env` value can come from anywhere a workflow can compute one, so no
+# file read verifies it. Spell such a target as a literal `make <t>` or as a
+# matrix arm, both of which the scan reads. An unresolved interpolation
+# contributes no target, so the gate it drives reads as homeless and
+# `gates-home-check` fails naming it -- red, never a silent pass.
 GATES_CI_EXTRA ?=
+# Where the GATES_CI_EXTRA homes are looked for. Defaults to the directory
+# holding GATES_CI_FILE; overridable so the check can be sabotaged on a copy.
+GATES_WORKFLOW_DIR ?= $(patsubst %/,%,$(dir $(GATES_CI_FILE)))
 
 $(call _std_require,TEST_CMD,every repo)
 $(call _std_require,TEST_FAST_CMD,every repo)
@@ -419,22 +451,51 @@ gates-home-check: ## Verify every gate in GATES_DEPS runs in some CI job
 	         if [ "$$all" = 1 ]; then covered="$$covered$$t "; added=1; fi; \
 	     done; \
 	 done; \
-	 rc=0; n=0; \
+	 : "A GATES_CI_EXTRA name is in ci_targets by declaration, so it is"; \
+	 : "held to a real home: some workflow under GATES_WORKFLOW_DIR must run"; \
+	 : "it, read by _STD_MAKE_RUNS -- the scan GATES_CI_FILE gets, so the two"; \
+	 : "cannot disagree about what a make line is. A subshell, so the loop's"; \
+	 : "ci does not clobber the one the rest of this recipe reads."; \
+	 rc=0; \
+	 if [ -n "$(strip $(GATES_CI_EXTRA))" ]; then \
+	     ( xrc=0; \
+	       for x in $(GATES_CI_EXTRA); do \
+	           home=""; \
+	           for ci in "$(GATES_WORKFLOW_DIR)"/*.yml "$(GATES_WORKFLOW_DIR)"/*.yaml; do \
+	               [ -f "$$ci" ] || continue; \
+	               if $(_STD_MAKE_RUNS) | grep -qxF "$$x"; then home="$$ci"; break; fi; \
+	           done; \
+	           if [ -z "$$home" ]; then \
+	               echo "ERROR: GATES_CI_EXTRA names '$$x', but no workflow in $(GATES_WORKFLOW_DIR) runs 'make $$x'"; \
+	               xrc=1; \
+	           fi; \
+	       done; \
+	       if [ $$xrc -ne 0 ]; then \
+	           echo ""; \
+	           echo "  GATES_CI_EXTRA counts a name as run by CI, so each one must be: an"; \
+	           echo "  uncommented 'make <name>' line (or matrix arm) in some workflow."; \
+	           echo "  Restore the workflow line, or drop the name from GATES_CI_EXTRA."; \
+	           echo ""; \
+	       fi; \
+	       exit $$xrc ) || rc=1; \
+	 fi; \
+	 n=0; drc=0; \
 	 for t in $(GATES_DEPS); do \
 	     case " $(GATES_LOCAL_ONLY) " in *" $$t "*) continue;; esac; \
 	     n=$$((n+1)); \
 	     case "$$covered" in *" $$t "*) continue;; esac; \
 	     echo "ERROR: 'make $$t' is in GATES_DEPS, but no job in $$ci runs it"; \
-	     rc=1; \
+	     drc=1; \
 	 done; \
-	 if [ $$rc -ne 0 ]; then \
+	 if [ "$$drc" = 1 ]; then \
 	     echo ""; \
 	     echo "  A gate nothing runs guards nothing. Wire it into $$ci, drop it"; \
 	     echo "  from GATES_DEPS, or name it in GATES_LOCAL_ONLY — which takes"; \
 	     echo "  a gate that cannot run on a runner AND an aggregate whose work"; \
 	     echo "  already runs under other names. See the comment on it."; \
-	     exit 1; \
+	     rc=1; \
 	 fi; \
+	 [ $$rc -eq 0 ] || exit 1; \
 	 echo "gates-home-check: $$n gate(s) have an execution home in CI"
 
 # ── HAS_C ────────────────────────────────────────────────────────────────────
@@ -755,6 +816,10 @@ CI_CHECK_NAME ?= CI passed
 export VERSION_PROBES
 # Extra guidance echoed after `release-branch`, repo-specific by nature.
 RELEASE_BRANCH_NOTES ?=
+# What `release-branch` does about the changelog: tell a human, unless
+# HAS_CHANGELOG (below) replaces both with the assembly itself.
+_std_release_changelog      =
+_std_release_changelog_note = @echo "  - edit CHANGELOG.md ([Unreleased] -> [$(VERSION)])"
 
 $(call _std_require,BUMP_VERSION_CMD,HAS_RELEASE)
 $(call _std_require,VERSION_PROBES,HAS_RELEASE)
@@ -919,9 +984,10 @@ endif
 	git fetch origin main
 	git checkout -b chore/release-$(VERSION) origin/main
 	@$(MAKE) bump-version VERSION=$(VERSION)
+	$(_std_release_changelog)
 	@echo ""
 	@echo "Now:"
-	@echo "  - edit CHANGELOG.md ([Unreleased] -> [$(VERSION)])"
+	$(_std_release_changelog_note)
 	$(RELEASE_BRANCH_NOTES)
 	@echo "  - git commit -am 'chore: release v$(VERSION)', push, open a PR"
 	@echo "  - merge once green, then: git checkout main && git pull &&"
@@ -1014,6 +1080,86 @@ endif
 ship: tag-release release-watch ## VERSION=x.y.z — tag-release then release-watch
 endif
 
+# ── HAS_CHANGELOG ────────────────────────────────────────────────────────────
+# An entry is a FILE, `changelog.d/<section>/<slug>.md`, promoted into
+# CHANGELOG.md once per release. Every open PR used to append to the top of
+# `[Unreleased]`, so each merge knocked every other open PR to CONFLICTING:
+# O(N^2) hand-resolutions, none about code, each restarting that PR's CI.
+# doppler measured it with twelve PRs in flight and built this; just-makeit
+# hit it with twenty in a day and adopted it from here rather than growing a
+# second copy (just-buildit.github.io#50).
+#
+# All the logic is ONE vendored script, `scripts/changelog.py`, so the three
+# questions below read the file with one parser. It is added to
+# VENDORED_FILES here rather than left for the repo to list: turning the flag
+# on is then all it takes to fetch it (`make standard-update`) and to hold it
+# to canonical (`standard-check`).
+#
+#   CHANGELOG_CODE_PATHS  REQUIRED. The paths whose change needs an entry
+#                         (`src native`); a docs-only branch needs none.
+#   CHANGELOG_BASE        what "this branch" is measured against. CI passes
+#                         the PR's base SHA and needs `fetch-depth: 0`.
+#   CHANGELOG_SECTIONS    the section directories, in published order.
+#                         `docs` is in the default because three of the four
+#                         adopters already publish a `### Docs`.
+ifeq ($(HAS_CHANGELOG),1)
+STD_TARGETS += changelog-check changelog-sections-check changelog-assemble \
+               changelog-assembled-check
+
+CHANGELOG_FILE       ?= CHANGELOG.md
+CHANGELOG_DIR        ?= changelog.d
+CHANGELOG_BASE       ?= origin/main
+CHANGELOG_CODE_PATHS ?=
+CHANGELOG_SECTIONS   ?= breaking added changed deprecated removed fixed \
+                        security docs
+CHANGELOG_PYTHON     ?= python3
+VENDORED_FILES       += scripts/changelog.py
+
+$(call _std_require,CHANGELOG_CODE_PATHS,HAS_CHANGELOG)
+
+_std_changelog = $(CHANGELOG_PYTHON) scripts/changelog.py \
+    --file $(CHANGELOG_FILE) --dir $(CHANGELOG_DIR) \
+    --sections "$(strip $(CHANGELOG_SECTIONS))"
+
+# Both branch gates run in `lint`, so the one CI job that runs `make lint`
+# enforces them and no workflow has to remember a second name.
+lint: changelog-check changelog-sections-check
+
+changelog-check: ## A branch that changes code adds a changelog.d/ fragment
+	@$(_std_changelog) check $(CHANGELOG_BASE) $(CHANGELOG_CODE_PATHS)
+
+# A released section is history. The one edit allowed is restoring a section
+# to what its v<version> tag shipped, which is how a misplaced entry is taken
+# back out. Comparing whole sections rather than diff hunks is what lets the
+# release branch rename [Unreleased] with no carve-out for its name.
+changelog-sections-check: ## A branch edits no released CHANGELOG section
+	@$(_std_changelog) sections $(CHANGELOG_BASE)
+
+# Stages what it did: the fragments are deleted in the worktree but still
+# tracked, so the next `make lint` would hand the formatter paths that no
+# longer exist and fail on a step that succeeded (doppler, cutting v0.44.0).
+changelog-assemble: ## [VERSION=x.y.z] Promote changelog.d/ fragments into CHANGELOG.md
+	@$(_std_changelog) assemble $(if $(VERSION),--version $(VERSION))
+	@git add -A $(CHANGELOG_DIR) $(CHANGELOG_FILE)
+
+# Not in `lint`: a feature branch legitimately carries fragments, so it would
+# be red on every PR. The one moment the question means anything is the
+# irreversible one, so it is a prerequisite of `tag-release` below. doppler,
+# before it had this: 62 fragments outstanding would have published 5 entries
+# out of 67.
+changelog-assembled-check: ## Fail while any changelog.d/ fragment is unassembled
+	@$(_std_changelog) assemble --check
+
+ifeq ($(HAS_RELEASE),1)
+tag-release: changelog-assembled-check
+# `release-branch` promotes the fragments into the new version's section
+# itself. Writing an entry is prose and stays prose; renaming a heading is a
+# hand step, and hand steps are the ones that rot (doppler#996).
+_std_release_changelog = @$(MAKE) --no-print-directory changelog-assemble VERSION=$(VERSION)
+_std_release_changelog_note = @echo "  - review CHANGELOG.md: changelog.d/ was promoted into [$(VERSION)]"
+endif
+endif
+
 # ── HAS_EXAMPLES ─────────────────────────────────────────────────────────────
 ifeq ($(HAS_EXAMPLES),1)
 STD_TARGETS += test-examples
@@ -1080,10 +1226,13 @@ STD_TARGETS += hook-stage-check tracked-paths-check
 # is far too big to hold in a shell variable comfortably.
 _STD_TMP = mktemp "$${TMPDIR:-/tmp}/std.XXXXXX"
 
-# The `make <target>` invocations in $$ci, one per line, sorted and unique.
-# ONE extractor because `gates-check` and `gates-home-check` are the two
-# directions of a single claim, and two copies of a scan is how the directions
-# come to disagree about what CI runs. Takes `make` only at a command position
+# The `make <target>` invocations in the workflow file $$ci, one per line,
+# unsorted. ONE extractor because `gates-check` and `gates-home-check` are the
+# two directions of a single claim, and two copies of a scan is how the
+# directions come to disagree about what CI runs -- and the same one again
+# verifies each GATES_CI_EXTRA home, run over every workflow in
+# GATES_WORKFLOW_DIR, so "what a `make` line is" has exactly one answer.
+# Takes `make` only at a command position
 # (start of a `run:` line or block-scalar body, or after ; & |), so neither
 # `cmake` nor a `make X` inside a comment or a `name:` counts, and the first
 # token only, so a target invoked with arguments still does. Reads `ci` from
@@ -1107,11 +1256,12 @@ _STD_TMP = mktemp "$${TMPDIR:-/tmp}/std.XXXXXX"
 # repo the check was written for. The interpolation names the key that supplies
 # it, so the values are resolved rather than guessed at: `matrix.san.target`
 # reads `target:` under `san:`, and a flat `matrix.thing` reads the list.
-_STD_CI_TARGETS = { sed -E 's/(^|[[:space:]])\#.*$$//' "$$ci" \
+_STD_MAKE_RUNS = { sed -E 's/(^|[[:space:]])\#.*$$//' "$$ci" \
 	     | grep -hoE '(^[[:space:]]*(- )?run:[[:space:]]*make|^[[:space:]]*make|[;&|][[:space:]]*make)[[:space:]]+[a-zA-Z_][a-zA-Z0-9_-]*' \
 	     | grep -oE 'make[[:space:]]+[a-zA-Z_][a-zA-Z0-9_-]*$$' \
 	     | sed -E 's/make[[:space:]]+//'; \
-	   for _e in $$(grep -oE 'make[[:space:]]+\$$\{\{[[:space:]]*matrix\.[a-zA-Z0-9_.]+' "$$ci" \
+	   for _e in $$(sed -E 's/(^|[[:space:]])\#.*$$//' "$$ci" \
+	       | grep -oE 'make[[:space:]]+\$$\{\{[[:space:]]*matrix\.[a-zA-Z0-9_.]+' \
 	       | sed -E 's/.*matrix\.//' | LC_ALL=C sort -u); do \
 	     _k=$${_e%%.*}; _f=$${_e\#*.}; \
 	     if [ "$$_f" = "$$_e" ]; then \
@@ -1124,6 +1274,12 @@ _STD_CI_TARGETS = { sed -E 's/(^|[[:space:]])\#.*$$//' "$$ci" \
 	         | sed -E "s/.*$$_f:[[:space:]]*//"; \
 	     fi; \
 	   done; \
+	 }
+
+# What CI runs, as both gates read it: the scan of GATES_CI_FILE plus the
+# GATES_CI_EXTRA names, sorted and unique. The extras are trusted HERE only
+# because `gates-home-check` verifies each against a real workflow line.
+_STD_CI_TARGETS = { $(_STD_MAKE_RUNS); \
 	   for _x in $(GATES_CI_EXTRA); do echo "$$_x"; done; \
 	 } | LC_ALL=C sort -u
 
@@ -1173,6 +1329,8 @@ _STD_SECTION = case "$$t" in \
     coverage|coverage-gate) tsec="Coverage";; \
     bump-version|version-check|release-branch|tag-release|release-watch \
         |ship|ci-changes) tsec="Release";; \
+    changelog-check|changelog-sections-check|changelog-assemble \
+        |changelog-assembled-check) tsec="Changelog";; \
     test-examples) tsec="Examples";; \
     standard-check|standard-update|help-check|ghost-check|hook-dispatch-check|hook-stage-check|tracked-paths-check) \
         tsec="Gates";; \
@@ -1180,7 +1338,7 @@ _STD_SECTION = case "$$t" in \
 esac
 
 _STD_SECTION_ORDER = Core Lint Aggregates C Python Rust Docs Doxygen Bench \
-                      Coverage Release Examples Gates Local
+                      Coverage Release Changelog Examples Gates Local
 
 # Drift. Fetches canonical EVERY time, with no cache: a cache would mean the
 # most likely failure — the fetch failing while the network is fine (CDN
@@ -1215,10 +1373,7 @@ standard-update: ## Re-fetch every vendored file from canonical
 	    exit 0; \
 	fi; \
 	for f in $(STANDARD_FILE) $(VENDORED_FILES); do \
-	    case "x$$f" in \
-	        "x$(STANDARD_FILE)") u="$(STANDARD_URL)" ;; \
-	        *)                   u="$(VENDOR_BASE_URL)$$f" ;; \
-	    esac; \
+	    $(_std_vendor_src); \
 	    tmp=$$(mktemp); \
 	    if ! curl -fsSL "$$u" -o "$$tmp" 2>/dev/null; then \
 	        rm -f "$$tmp"; \
@@ -1243,14 +1398,7 @@ standard-check: ## Verify every vendored file matches canonical
 	fi; \
 	n=0; fail=0; \
 	for f in $(STANDARD_FILE) $(VENDORED_FILES); do \
-	    : "The x prefix is load-bearing: an empty STANDARD_FILE expands the"; \
-	    : "pattern to a bare ) and the shell dies on a syntax error instead"; \
-	    : "of reaching the compared-0-files guard below. Quoted, so an exact"; \
-	    : "match rather than a glob."; \
-	    case "x$$f" in \
-	        "x$(STANDARD_FILE)") u="$(STANDARD_URL)" ;; \
-	        *)                   u="$(VENDOR_BASE_URL)$$f" ;; \
-	    esac; \
+	    $(_std_vendor_src); \
 	    if [ ! -f "$$f" ]; then \
 	        echo "ERROR: $$f is vendored but missing from this repo."; \
 	        echo "  A gate that compares nothing has not passed. Fetch it:"; \
