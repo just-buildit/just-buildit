@@ -43,7 +43,7 @@
 # all, so its targets do not exist and `help` does not list them):
 #
 #   HAS_C HAS_PYTHON HAS_RUST HAS_DOCS HAS_DOXYGEN HAS_BENCH HAS_COVERAGE
-#   HAS_RELEASE HAS_EXAMPLES
+#   HAS_RELEASE HAS_CHANGELOG HAS_EXAMPLES
 #
 # A command variable either has a universally correct default (`TEST_RUST_CMD`
 # is `cargo test`) or is REQUIRED once its flag is on — see "Required
@@ -91,6 +91,24 @@ STANDARD_URL  ?= https://just-buildit.github.io/standard.mk
 # checking one file against staging and the rest against production.
 VENDORED_FILES  ?=
 VENDOR_BASE_URL ?= $(dir $(STANDARD_URL))
+
+# Where vendored file $f is fetched from, as shell that sets `u`. ONE
+# derivation, used by both standard-update and standard-check, so the fetch
+# and the check cannot disagree about where a file lives.
+#
+# A path under `.github/` is served from `github/` (no dot): Pages publishes
+# dotfiles but never the `.github/` directory, and `.github/dependabot.yml`
+# is the one place Dependabot reads its config. So canonical publishes
+# `github/dependabot.yml`, and an adopter lists `.github/dependabot.yml`.
+#
+# The x prefix is load-bearing: an empty STANDARD_FILE expands the first
+# pattern to a bare ) and the shell dies on a syntax error. Quoted, so an
+# exact match rather than a glob.
+_std_vendor_src = case "x$$f" in \
+        "x$(STANDARD_FILE)") u="$(STANDARD_URL)" ;; \
+        x.github/*)          u="$(VENDOR_BASE_URL)github/$${f\#.github/}" ;; \
+        *)                   u="$(VENDOR_BASE_URL)$$f" ;; \
+    esac
 
 # ── Tooling ──────────────────────────────────────────────────────────────────
 # The ONLY place a tool binary is named. Versions live in pyproject.toml's dev
@@ -181,12 +199,26 @@ GATES_PROVISION ?= install-deps
 # not an exception to it.
 GATES_LOCAL_ONLY ?=
 
-# Targets CI runs that the scan cannot see for itself -- one driven from an
-# `env` expression, or run by a workflow other than GATES_CI_FILE. Naming them
-# is better than widening the scan into a guess: the check refuses to run at
-# all when it meets an interpolation it cannot resolve, so a repo is told
-# exactly what to add rather than handed a wrong answer.
+# Targets run by a workflow OTHER than GATES_CI_FILE -- a scheduled job, a
+# release workflow. Naming one here counts it as run by CI, so the name is
+# VERIFIED, not taken on trust: `gates-home-check` fails unless some workflow
+# under GATES_WORKFLOW_DIR runs `make <name>` on an uncommented line, read by
+# the same extractor (_STD_MAKE_RUNS) that reads GATES_CI_FILE. Before it was,
+# a deleted or renamed workflow left its target "covered" by the declaration
+# alone -- the reverse-direction gate satisfied by a list again (doppler#1716,
+# just-makeit#1768).
+#
+# A target driven from an `env` expression (`make $${{ env.T }}`) is NOT
+# something this variable takes: the scan resolves matrix arms only, and
+# an `env` value can come from anywhere a workflow can compute one, so no
+# file read verifies it. Spell such a target as a literal `make <t>` or as a
+# matrix arm, both of which the scan reads. An unresolved interpolation
+# contributes no target, so the gate it drives reads as homeless and
+# `gates-home-check` fails naming it -- red, never a silent pass.
 GATES_CI_EXTRA ?=
+# Where the GATES_CI_EXTRA homes are looked for. Defaults to the directory
+# holding GATES_CI_FILE; overridable so the check can be sabotaged on a copy.
+GATES_WORKFLOW_DIR ?= $(patsubst %/,%,$(dir $(GATES_CI_FILE)))
 
 $(call _std_require,TEST_CMD,every repo)
 $(call _std_require,TEST_FAST_CMD,every repo)
@@ -212,7 +244,7 @@ test-fast: ## Run tests, stopping at the first failure
 # `lint` is the gate — CI runs exactly this and nothing else. The three
 # consistency gates come first because they are near-free and catch the class
 # of rot that review demonstrably does not.
-lint: standard-check help-check ghost-check hook-dispatch-check hook-stage-check tracked-paths-check gates-check gates-home-check ## Run the full lint gate (CI runs this)
+lint: standard-check help-check ghost-check hook-dispatch-check hook-stage-check tracked-paths-check workflow-timeout-check workflow-dispatch-check gates-check gates-home-check ## Run the full lint gate (CI runs this)
 	@hook=$$(git rev-parse --git-path hooks/pre-commit 2>/dev/null); \
 	 if [ -n "$$hook" ] && [ ! -f "$$hook" ]; then \
 	     $(PRE_COMMIT) install >/dev/null 2>&1 \
@@ -281,6 +313,12 @@ STD_TARGETS += test-all gates gates-check gates-home-check
 
 test-all: $(TEST_ALL_DEPS) ## Run every test suite in the repo
 
+# WHAT IT IS FOR: debugging a CI failure, and nothing else. CI runs these
+# gates in parallel on every PR; running them first, serially, on one machine
+# only repeats that work before CI repeats it again. When CI goes red, read
+# the job log; reach for this when the log does not explain the red. It is
+# never a pre-push step.
+#
 # Re-invoked with `-k` rather than declared as prerequisites, so ONE red gate
 # does not hide every gate ordered behind it. As a prerequisite list, make stops
 # at the first failure and the rest never run -- which reads as an ordinary
@@ -298,7 +336,7 @@ test-all: $(TEST_ALL_DEPS) ## Run every test suite in the repo
 # specific flag cannot, because the running make fixed its keep-going mode at
 # startup. Under `-j` the gates still schedule in parallel, which a shell loop
 # over the list would have serialised.
-gates: ## Run every gate that guards a merge
+gates: ## Reproduce CI's gate set locally -- to debug a CI red, never pre-CI
 	@$(MAKE) --no-print-directory -k $(GATES_DEPS)
 	@echo ""
 	@echo "gates: ALL PASS"
@@ -419,22 +457,51 @@ gates-home-check: ## Verify every gate in GATES_DEPS runs in some CI job
 	         if [ "$$all" = 1 ]; then covered="$$covered$$t "; added=1; fi; \
 	     done; \
 	 done; \
-	 rc=0; n=0; \
+	 : "A GATES_CI_EXTRA name is in ci_targets by declaration, so it is"; \
+	 : "held to a real home: some workflow under GATES_WORKFLOW_DIR must run"; \
+	 : "it, read by _STD_MAKE_RUNS -- the scan GATES_CI_FILE gets, so the two"; \
+	 : "cannot disagree about what a make line is. A subshell, so the loop's"; \
+	 : "ci does not clobber the one the rest of this recipe reads."; \
+	 rc=0; \
+	 if [ -n "$(strip $(GATES_CI_EXTRA))" ]; then \
+	     ( xrc=0; \
+	       for x in $(GATES_CI_EXTRA); do \
+	           home=""; \
+	           for ci in "$(GATES_WORKFLOW_DIR)"/*.yml "$(GATES_WORKFLOW_DIR)"/*.yaml; do \
+	               [ -f "$$ci" ] || continue; \
+	               if $(_STD_MAKE_RUNS) | grep -qxF "$$x"; then home="$$ci"; break; fi; \
+	           done; \
+	           if [ -z "$$home" ]; then \
+	               echo "ERROR: GATES_CI_EXTRA names '$$x', but no workflow in $(GATES_WORKFLOW_DIR) runs 'make $$x'"; \
+	               xrc=1; \
+	           fi; \
+	       done; \
+	       if [ $$xrc -ne 0 ]; then \
+	           echo ""; \
+	           echo "  GATES_CI_EXTRA counts a name as run by CI, so each one must be: an"; \
+	           echo "  uncommented 'make <name>' line (or matrix arm) in some workflow."; \
+	           echo "  Restore the workflow line, or drop the name from GATES_CI_EXTRA."; \
+	           echo ""; \
+	       fi; \
+	       exit $$xrc ) || rc=1; \
+	 fi; \
+	 n=0; drc=0; \
 	 for t in $(GATES_DEPS); do \
 	     case " $(GATES_LOCAL_ONLY) " in *" $$t "*) continue;; esac; \
 	     n=$$((n+1)); \
 	     case "$$covered" in *" $$t "*) continue;; esac; \
 	     echo "ERROR: 'make $$t' is in GATES_DEPS, but no job in $$ci runs it"; \
-	     rc=1; \
+	     drc=1; \
 	 done; \
-	 if [ $$rc -ne 0 ]; then \
+	 if [ "$$drc" = 1 ]; then \
 	     echo ""; \
 	     echo "  A gate nothing runs guards nothing. Wire it into $$ci, drop it"; \
 	     echo "  from GATES_DEPS, or name it in GATES_LOCAL_ONLY — which takes"; \
 	     echo "  a gate that cannot run on a runner AND an aggregate whose work"; \
 	     echo "  already runs under other names. See the comment on it."; \
-	     exit 1; \
+	     rc=1; \
 	 fi; \
+	 [ $$rc -eq 0 ] || exit 1; \
 	 echo "gates-home-check: $$n gate(s) have an execution home in CI"
 
 # ── HAS_C ────────────────────────────────────────────────────────────────────
@@ -737,7 +804,7 @@ endif
 # two in one go. `release` is NOT part of this — it is the C build type.
 ifeq ($(HAS_RELEASE),1)
 STD_TARGETS += bump-version version-check release-branch tag-release \
-               release-watch ship ci-changes
+               release-watch ship ci-changes ci-tree-tested ci-docs
 
 BUMP_VERSION_CMD  ?=
 RELEASE_WATCH_CMD ?=
@@ -755,6 +822,10 @@ CI_CHECK_NAME ?= CI passed
 export VERSION_PROBES
 # Extra guidance echoed after `release-branch`, repo-specific by nature.
 RELEASE_BRANCH_NOTES ?=
+# What `release-branch` does about the changelog: tell a human, unless
+# HAS_CHANGELOG (below) replaces both with the assembly itself.
+_std_release_changelog      =
+_std_release_changelog_note = @echo "  - edit CHANGELOG.md ([Unreleased] -> [$(VERSION)])"
 
 $(call _std_require,BUMP_VERSION_CMD,HAS_RELEASE)
 $(call _std_require,VERSION_PROBES,HAS_RELEASE)
@@ -907,6 +978,48 @@ ci-changes: ## [BASE=<rev>] src=false when HEAD is only a version bump over BASE
 	 done; \
 	 say false "a version bump alone ($$old -> $$new, $$n manifest(s)); the matrix can skip"
 
+# The other change CI has already tested: a push whose tree is a merged PR's
+# head, when that head already contained the tip the push replaced and passed
+# $(CI_CHECK_NAME) as a PR. The PR's own run tested exactly this tree, so the
+# push run would test it twice. A `changes` job runs this on `push` before
+# ci-changes and, on tested=true, answers src=false -- the one skip path
+# `CI passed` already knows. A branch rebased onto the tip before it merges
+# therefore lands at no CI cost; a stale one gets the full run, which is the
+# composition test it owes. All the logic, and why each condition is needed,
+# is in the vendored script; it fails safe (tested=false) on any doubt.
+#
+# Prints `tested=true|false` and appends it to $GITHUB_OUTPUT when set. BEFORE
+# is the push event's `before`; the workflow step needs GH_TOKEN for `gh api`.
+VENDORED_FILES += scripts/ci-tree-tested.sh
+
+ci-tree-tested: ## BEFORE=<sha> tested=true when HEAD's tree already passed CI as a merged PR
+	@CI_CHECK_NAME='$(CI_CHECK_NAME)' bash scripts/ci-tree-tested.sh '$(BEFORE)'
+
+# The third lighter lane: a diff that touches only the docs. `make ci-docs`
+# prints docs= (did any changed path match CI_DOCS_RE) and code= (did
+# anything else change). A `changes` job gates every job docs cannot break
+# on `code`, and its aggregator lets them skip only on an explicit
+# code=false. A deletion outside CI_DOCS_DIRS is never docs-only: a docs
+# file can be READ by something that is not docs (pyproject's `readme`),
+# and editing it cannot break that reader where removing it can. Any doubt
+# -- an unreadable BASE, an empty diff -- answers code=true.
+#
+# CI_DOCS_RE minus CI_DOCS_EXCLUDE_RE is the repo's ONE declaration of what
+# its docs are: include-minus-exclude, the C_INCLUDE_RE / C_EXCLUDE_RE shape,
+# so no pattern needs a lookahead. A repo whose docs/ holds GENERATED copies
+# of something that is not docs (just-makeit's docs/examples/, built from
+# example .steps) excludes them, or a change to their source could read as
+# docs-only.
+CI_DOCS_RE         ?= ^(docs/|mkdocs[^/]*\.yml$$|CHANGELOG\.md$$|changelog\.d/|README\.md$$)
+CI_DOCS_EXCLUDE_RE ?=
+CI_DOCS_DIRS       ?= docs/ changelog.d/
+VENDORED_FILES += scripts/ci-docs.py
+
+ci-docs: ## [BASE=<rev>] docs=/code= for a diff -- code=false when only docs changed
+	@python3 scripts/ci-docs.py --base '$(or $(BASE),HEAD^)' \
+	    --re '$(CI_DOCS_RE)' --exclude '$(CI_DOCS_EXCLUDE_RE)' \
+	    --dirs '$(CI_DOCS_DIRS)'
+
 # The explicit origin/main start point matters: a bare `checkout -b` forks from
 # whatever HEAD the invoker happens to be on (a feature branch, a stale main),
 # silently building the release on the wrong base — the bump then misses
@@ -919,9 +1032,10 @@ endif
 	git fetch origin main
 	git checkout -b chore/release-$(VERSION) origin/main
 	@$(MAKE) bump-version VERSION=$(VERSION)
+	$(_std_release_changelog)
 	@echo ""
 	@echo "Now:"
-	@echo "  - edit CHANGELOG.md ([Unreleased] -> [$(VERSION)])"
+	$(_std_release_changelog_note)
 	$(RELEASE_BRANCH_NOTES)
 	@echo "  - git commit -am 'chore: release v$(VERSION)', push, open a PR"
 	@echo "  - merge once green, then: git checkout main && git pull &&"
@@ -1014,6 +1128,86 @@ endif
 ship: tag-release release-watch ## VERSION=x.y.z — tag-release then release-watch
 endif
 
+# ── HAS_CHANGELOG ────────────────────────────────────────────────────────────
+# An entry is a FILE, `changelog.d/<section>/<slug>.md`, promoted into
+# CHANGELOG.md once per release. Every open PR used to append to the top of
+# `[Unreleased]`, so each merge knocked every other open PR to CONFLICTING:
+# O(N^2) hand-resolutions, none about code, each restarting that PR's CI.
+# doppler measured it with twelve PRs in flight and built this; just-makeit
+# hit it with twenty in a day and adopted it from here rather than growing a
+# second copy (just-buildit.github.io#50).
+#
+# All the logic is ONE vendored script, `scripts/changelog.py`, so the three
+# questions below read the file with one parser. It is added to
+# VENDORED_FILES here rather than left for the repo to list: turning the flag
+# on is then all it takes to fetch it (`make standard-update`) and to hold it
+# to canonical (`standard-check`).
+#
+#   CHANGELOG_CODE_PATHS  REQUIRED. The paths whose change needs an entry
+#                         (`src native`); a docs-only branch needs none.
+#   CHANGELOG_BASE        what "this branch" is measured against. CI passes
+#                         the PR's base SHA and needs `fetch-depth: 0`.
+#   CHANGELOG_SECTIONS    the section directories, in published order.
+#                         `docs` is in the default because three of the four
+#                         adopters already publish a `### Docs`.
+ifeq ($(HAS_CHANGELOG),1)
+STD_TARGETS += changelog-check changelog-sections-check changelog-assemble \
+               changelog-assembled-check
+
+CHANGELOG_FILE       ?= CHANGELOG.md
+CHANGELOG_DIR        ?= changelog.d
+CHANGELOG_BASE       ?= origin/main
+CHANGELOG_CODE_PATHS ?=
+CHANGELOG_SECTIONS   ?= breaking added changed deprecated removed fixed \
+                        security docs
+CHANGELOG_PYTHON     ?= python3
+VENDORED_FILES       += scripts/changelog.py
+
+$(call _std_require,CHANGELOG_CODE_PATHS,HAS_CHANGELOG)
+
+_std_changelog = $(CHANGELOG_PYTHON) scripts/changelog.py \
+    --file $(CHANGELOG_FILE) --dir $(CHANGELOG_DIR) \
+    --sections "$(strip $(CHANGELOG_SECTIONS))"
+
+# Both branch gates run in `lint`, so the one CI job that runs `make lint`
+# enforces them and no workflow has to remember a second name.
+lint: changelog-check changelog-sections-check
+
+changelog-check: ## A branch that changes code adds a changelog.d/ fragment
+	@$(_std_changelog) check $(CHANGELOG_BASE) $(CHANGELOG_CODE_PATHS)
+
+# A released section is history. The one edit allowed is restoring a section
+# to what its v<version> tag shipped, which is how a misplaced entry is taken
+# back out. Comparing whole sections rather than diff hunks is what lets the
+# release branch rename [Unreleased] with no carve-out for its name.
+changelog-sections-check: ## A branch edits no released CHANGELOG section
+	@$(_std_changelog) sections $(CHANGELOG_BASE)
+
+# Stages what it did: the fragments are deleted in the worktree but still
+# tracked, so the next `make lint` would hand the formatter paths that no
+# longer exist and fail on a step that succeeded (doppler, cutting v0.44.0).
+changelog-assemble: ## [VERSION=x.y.z] Promote changelog.d/ fragments into CHANGELOG.md
+	@$(_std_changelog) assemble $(if $(VERSION),--version $(VERSION))
+	@git add -A $(CHANGELOG_DIR) $(CHANGELOG_FILE)
+
+# Not in `lint`: a feature branch legitimately carries fragments, so it would
+# be red on every PR. The one moment the question means anything is the
+# irreversible one, so it is a prerequisite of `tag-release` below. doppler,
+# before it had this: 62 fragments outstanding would have published 5 entries
+# out of 67.
+changelog-assembled-check: ## Fail while any changelog.d/ fragment is unassembled
+	@$(_std_changelog) assemble --check
+
+ifeq ($(HAS_RELEASE),1)
+tag-release: changelog-assembled-check
+# `release-branch` promotes the fragments into the new version's section
+# itself. Writing an entry is prose and stays prose; renaming a heading is a
+# hand step, and hand steps are the ones that rot (doppler#996).
+_std_release_changelog = @$(MAKE) --no-print-directory changelog-assemble VERSION=$(VERSION)
+_std_release_changelog_note = @echo "  - review CHANGELOG.md: changelog.d/ was promoted into [$(VERSION)]"
+endif
+endif
+
 # ── HAS_EXAMPLES ─────────────────────────────────────────────────────────────
 ifeq ($(HAS_EXAMPLES),1)
 STD_TARGETS += test-examples
@@ -1073,17 +1267,21 @@ tracked-paths-check: ## Tracked paths are typeable, and none differ only in case
 	 echo "tracked-paths-check: $$(git ls-files | grep -c .) tracked path(s), every name typeable, none differ only in case"
 
 STD_TARGETS += standard-check standard-update help-check ghost-check hook-dispatch-check
-STD_TARGETS += hook-stage-check tracked-paths-check
+STD_TARGETS += hook-stage-check tracked-paths-check workflow-timeout-check \
+               workflow-dispatch-check
 
 # A temp file, portably: bare `mktemp` is a GNU extension, and the BSD one
 # macOS ships requires a template. The gates parse make's own database, which
 # is far too big to hold in a shell variable comfortably.
 _STD_TMP = mktemp "$${TMPDIR:-/tmp}/std.XXXXXX"
 
-# The `make <target>` invocations in $$ci, one per line, sorted and unique.
-# ONE extractor because `gates-check` and `gates-home-check` are the two
-# directions of a single claim, and two copies of a scan is how the directions
-# come to disagree about what CI runs. Takes `make` only at a command position
+# The `make <target>` invocations in the workflow file $$ci, one per line,
+# unsorted. ONE extractor because `gates-check` and `gates-home-check` are the
+# two directions of a single claim, and two copies of a scan is how the
+# directions come to disagree about what CI runs -- and the same one again
+# verifies each GATES_CI_EXTRA home, run over every workflow in
+# GATES_WORKFLOW_DIR, so "what a `make` line is" has exactly one answer.
+# Takes `make` only at a command position
 # (start of a `run:` line or block-scalar body, or after ; & |), so neither
 # `cmake` nor a `make X` inside a comment or a `name:` counts, and the first
 # token only, so a target invoked with arguments still does. Reads `ci` from
@@ -1107,11 +1305,12 @@ _STD_TMP = mktemp "$${TMPDIR:-/tmp}/std.XXXXXX"
 # repo the check was written for. The interpolation names the key that supplies
 # it, so the values are resolved rather than guessed at: `matrix.san.target`
 # reads `target:` under `san:`, and a flat `matrix.thing` reads the list.
-_STD_CI_TARGETS = { sed -E 's/(^|[[:space:]])\#.*$$//' "$$ci" \
+_STD_MAKE_RUNS = { sed -E 's/(^|[[:space:]])\#.*$$//' "$$ci" \
 	     | grep -hoE '(^[[:space:]]*(- )?run:[[:space:]]*make|^[[:space:]]*make|[;&|][[:space:]]*make)[[:space:]]+[a-zA-Z_][a-zA-Z0-9_-]*' \
 	     | grep -oE 'make[[:space:]]+[a-zA-Z_][a-zA-Z0-9_-]*$$' \
 	     | sed -E 's/make[[:space:]]+//'; \
-	   for _e in $$(grep -oE 'make[[:space:]]+\$$\{\{[[:space:]]*matrix\.[a-zA-Z0-9_.]+' "$$ci" \
+	   for _e in $$(sed -E 's/(^|[[:space:]])\#.*$$//' "$$ci" \
+	       | grep -oE 'make[[:space:]]+\$$\{\{[[:space:]]*matrix\.[a-zA-Z0-9_.]+' \
 	       | sed -E 's/.*matrix\.//' | LC_ALL=C sort -u); do \
 	     _k=$${_e%%.*}; _f=$${_e\#*.}; \
 	     if [ "$$_f" = "$$_e" ]; then \
@@ -1124,6 +1323,12 @@ _STD_CI_TARGETS = { sed -E 's/(^|[[:space:]])\#.*$$//' "$$ci" \
 	         | sed -E "s/.*$$_f:[[:space:]]*//"; \
 	     fi; \
 	   done; \
+	 }
+
+# What CI runs, as both gates read it: the scan of GATES_CI_FILE plus the
+# GATES_CI_EXTRA names, sorted and unique. The extras are trusted HERE only
+# because `gates-home-check` verifies each against a real workflow line.
+_STD_CI_TARGETS = { $(_STD_MAKE_RUNS); \
 	   for _x in $(GATES_CI_EXTRA); do echo "$$_x"; done; \
 	 } | LC_ALL=C sort -u
 
@@ -1172,15 +1377,17 @@ _STD_SECTION = case "$$t" in \
     bench|bench-save|bench-compare) tsec="Bench";; \
     coverage|coverage-gate) tsec="Coverage";; \
     bump-version|version-check|release-branch|tag-release|release-watch \
-        |ship|ci-changes) tsec="Release";; \
+        |ship|ci-changes|ci-tree-tested|ci-docs) tsec="Release";; \
+    changelog-check|changelog-sections-check|changelog-assemble \
+        |changelog-assembled-check) tsec="Changelog";; \
     test-examples) tsec="Examples";; \
-    standard-check|standard-update|help-check|ghost-check|hook-dispatch-check|hook-stage-check|tracked-paths-check) \
+    standard-check|standard-update|help-check|ghost-check|hook-dispatch-check|hook-stage-check|tracked-paths-check|workflow-timeout-check|workflow-dispatch-check) \
         tsec="Gates";; \
     *) tsec="Local";; \
 esac
 
 _STD_SECTION_ORDER = Core Lint Aggregates C Python Rust Docs Doxygen Bench \
-                      Coverage Release Examples Gates Local
+                      Coverage Release Changelog Examples Gates Local
 
 # Drift. Fetches canonical EVERY time, with no cache: a cache would mean the
 # most likely failure — the fetch failing while the network is fine (CDN
@@ -1214,11 +1421,15 @@ standard-update: ## Re-fetch every vendored file from canonical
 	    echo "  in this repo, so there is nothing to update."; \
 	    exit 0; \
 	fi; \
+	: "The list below is the one THIS make parsed, from the OLD standard.mk."; \
+	: "A canonical that adds a vendored file is fetched here, but the new"; \
+	: "entry it lists is not, and standard-check then failed: two passes"; \
+	: "needed, and the adopter bot runs one (just-buildit.github.io#76). So"; \
+	: "a pass that replaced standard.mk re-runs in a FRESH make, which"; \
+	: "re-parses it. That run finds standard.mk unchanged, so it cannot loop."; \
+	std_changed=0; \
 	for f in $(STANDARD_FILE) $(VENDORED_FILES); do \
-	    case "x$$f" in \
-	        "x$(STANDARD_FILE)") u="$(STANDARD_URL)" ;; \
-	        *)                   u="$(VENDOR_BASE_URL)$$f" ;; \
-	    esac; \
+	    $(_std_vendor_src); \
 	    tmp=$$(mktemp); \
 	    if ! curl -fsSL "$$u" -o "$$tmp" 2>/dev/null; then \
 	        rm -f "$$tmp"; \
@@ -1230,8 +1441,13 @@ standard-update: ## Re-fetch every vendored file from canonical
 	    else mkdir -p "$$(dirname "$$f")"; \
 	         if [ -x "$$f" ]; then mv "$$tmp" "$$f"; chmod +x "$$f"; \
 	         else mv "$$tmp" "$$f"; chmod 644 "$$f"; fi; \
-	         echo "  updated $$f"; fi; \
+	         echo "  updated $$f"; \
+	         if [ "$$f" = "$(STANDARD_FILE)" ]; then std_changed=1; fi; fi; \
 	done; \
+	if [ "$$std_changed" = 1 ]; then \
+	    echo "standard-update: $(STANDARD_FILE) changed — re-running with it"; \
+	    exec $(MAKE) --no-print-directory standard-update; \
+	fi; \
 	$(MAKE) --no-print-directory standard-check
 
 standard-check: ## Verify every vendored file matches canonical
@@ -1243,14 +1459,7 @@ standard-check: ## Verify every vendored file matches canonical
 	fi; \
 	n=0; fail=0; \
 	for f in $(STANDARD_FILE) $(VENDORED_FILES); do \
-	    : "The x prefix is load-bearing: an empty STANDARD_FILE expands the"; \
-	    : "pattern to a bare ) and the shell dies on a syntax error instead"; \
-	    : "of reaching the compared-0-files guard below. Quoted, so an exact"; \
-	    : "match rather than a glob."; \
-	    case "x$$f" in \
-	        "x$(STANDARD_FILE)") u="$(STANDARD_URL)" ;; \
-	        *)                   u="$(VENDOR_BASE_URL)$$f" ;; \
-	    esac; \
+	    $(_std_vendor_src); \
 	    if [ ! -f "$$f" ]; then \
 	        echo "ERROR: $$f is vendored but missing from this repo."; \
 	        echo "  A gate that compares nothing has not passed. Fetch it:"; \
@@ -1428,7 +1637,13 @@ ghost-check: ## Verify every .PHONY target has a recipe
 # containing $(MAKE). Probing a target must not run it.
 #
 # Inert with no config file, so a repo without pre-commit is not asked to care.
-hook-dispatch-check: ## Verify every pre-commit `make` dispatch names a real target
+# Pre-commit hooks that run their own tool rather than `make -s lint-<tool>`,
+# each a declared exception (hook id). The gate refuses an undeclared one and
+# an exemption that no longer names a non-dispatching hook, so the list can
+# only shrink toward the rule. Set it with the reason beside it.
+HOOK_DISPATCH_EXEMPT ?=
+
+hook-dispatch-check: ## Verify every pre-commit hook dispatches to a real `make` target
 	@cfg=.pre-commit-config.yaml; \
 	 if [ ! -f "$$cfg" ]; then \
 	     echo "hook-dispatch-check: no $$cfg — nothing to check"; \
@@ -1437,7 +1652,7 @@ hook-dispatch-check: ## Verify every pre-commit `make` dispatch names a real tar
 	 db=$$($(_STD_TMP)); trap 'rm -f "$$db"' EXIT; \
 	 $(MAKE) -rpn --no-print-directory .std-db-goal >"$$db" 2>/dev/null; \
 	 n=0; missing=""; \
-	 for t in $$(sed -n "s/^[[:space:]]*entry:[[:space:]]*make[[:space:]]\{1,\}\(-s[[:space:]]\{1,\}\)\{0,1\}\([a-zA-Z0-9_.-]\{1,\}\).*/\2/p" "$$cfg"); do \
+	 for t in $$(sed -n "s/^[[:space:]]*entry:[[:space:]]*[\"']\{0,1\}make[[:space:]]\{1,\}\(-s[[:space:]]\{1,\}\)\{0,1\}\([a-zA-Z0-9_.-]\{1,\}\).*/\2/p" "$$cfg"); do \
 	     n=$$((n + 1)); \
 	     grep -q "^$$t:" "$$db" || missing="$$missing $$t"; \
 	 done; \
@@ -1463,7 +1678,197 @@ hook-dispatch-check: ## Verify every pre-commit `make` dispatch names a real tar
 	     echo "  written to prevent."; \
 	     exit 1; \
 	 fi; \
-	 echo "hook-dispatch-check: $$n make dispatch(es) resolve"
+	 : "Every hook dispatches, or is declared not to (just-makeit#1801 item"; \
+	 : "4). Counting only the hooks that DO dispatch reported 7 resolving"; \
+	 : "while uv-lock ran upstream's own uv, pinned apart from the repo's:"; \
+	 : "the second source of truth this standard exists to end. A hook from"; \
+	 : "a remote repo has no entry: at all, so it is per hook, by id."; \
+	 verdict=$$(awk -v exempt="$(HOOK_DISPATCH_EXEMPT)" ' \
+	   function flush() { \
+	     if (id != "" && ent !~ /^make[[:space:]]/) nodisp[id] = 1; \
+	     id = ""; ent = "" \
+	   } \
+	   /^[[:space:]]*#/ { next } \
+	   /^[[:space:]]*-[[:space:]]*id:/ { \
+	     flush(); v = $$0; sub(/^[^:]*:[[:space:]]*/, "", v); \
+	     sub(/[[:space:]]*#.*/, "", v); gsub(/["\047]/, "", v); id = v; next \
+	   } \
+	   /^[[:space:]]*-[[:space:]]*repo:/ { flush(); next } \
+	   id != "" && /^[[:space:]]*entry:/ { \
+	     v = $$0; sub(/^[^:]*:[[:space:]]*/, "", v); gsub(/["\047]/, "", v); \
+	     ent = v; next \
+	   } \
+	   END { \
+	     flush(); n = split(exempt, ex, /[[:space:]]+/); \
+	     for (i = 1; i <= n; i++) if (ex[i] != "") isex[ex[i]] = 1; \
+	     for (h in nodisp) if (!(h in isex)) print "undeclared " h; \
+	     for (h in isex) if (!(h in nodisp)) print "stale " h; \
+	   } \
+	 ' "$$cfg"); \
+	 undeclared=$$(printf '%s\n' "$$verdict" | sed -n 's/^undeclared //p'); \
+	 stale=$$(printf '%s\n' "$$verdict" | sed -n 's/^stale //p'); \
+	 if [ -n "$$undeclared" ]; then \
+	     echo "ERROR: pre-commit hooks that do not dispatch through make:"; \
+	     printf '  %s\n' $$undeclared; \
+	     echo ""; \
+	     echo "  A hook that runs its own tool at its own pin is a second source"; \
+	     echo "  of truth for how that tool runs. Route it through a"; \
+	     echo "  \`make -s lint-<tool>\` target, or name it in"; \
+	     echo "  HOOK_DISPATCH_EXEMPT, with the reason beside it, as a known"; \
+	     echo "  exception the list may only shrink from."; \
+	     exit 1; \
+	 fi; \
+	 if [ -n "$$stale" ]; then \
+	     echo "ERROR: HOOK_DISPATCH_EXEMPT names hooks that are not exceptions:"; \
+	     printf '  %s\n' $$stale; \
+	     echo ""; \
+	     echo "  Each is no hook here, or now dispatches through make. Drop it:"; \
+	     echo "  an exemption that outlives its reason is granted to whatever"; \
+	     echo "  next takes the name."; \
+	     exit 1; \
+	 fi; \
+	 ex=$$(echo $(HOOK_DISPATCH_EXEMPT) | wc -w); \
+	 echo "hook-dispatch-check: $$n make dispatch(es) resolve; $$ex declared exception(s)"
+
+# ── workflow-timeout-check ──────────────────────────────────────────────────
+#
+# Every job in .github/workflows/ declares `timeout-minutes` (just-makeit#1801,
+# modification 6). An aggregator counts `cancelled` as a failure, but a job
+# with no ceiling is not cancelled for SIX HOURS, GitHub's default: a hung
+# job holds every PR's required check that long, and the third instance of
+# jm#1792 was exactly that (nco_tone). The ceiling is what turns a hang into a
+# prompt, attributable red.
+#
+# Job level only: a step's `timeout-minutes` bounds that step, not the job.
+# A job that is a reusable-workflow call (`uses:` at job level) is exempt --
+# its jobs live in the callee, which this gate reads too.
+#
+# POSIX awk, not a YAML library: a C-only repo has no Python YAML. Indentation
+# is LEARNED per file (the first key under `jobs:` sets the job indent, the
+# first deeper line of each job its attribute indent), so 2- and 4-space files
+# both parse, and a flow-style or unparseable job is reported, never passed.
+workflow-timeout-check: ## Verify every workflow job declares timeout-minutes
+	@dir=.github/workflows; \
+	 set -- $$dir/*.yml $$dir/*.yaml; \
+	 files=""; for f in "$$@"; do [ -f "$$f" ] && files="$$files $$f"; done; \
+	 if [ -z "$$files" ]; then \
+	     echo "workflow-timeout-check: no workflows — nothing to check"; \
+	     exit 0; \
+	 fi; \
+	 out=$$(awk ' \
+	   function lead(s) { match(s, /^ */); return RLENGTH } \
+	   function done_job() { \
+	     if (job != "" && !has_t && !has_u) print jfile ": " job; \
+	     job = ""; has_t = 0; has_u = 0; ai = -1 \
+	   } \
+	   FNR == 1 { done_job(); injobs = 0; ji = -1 } \
+	   /^[[:space:]]*(#|$$)/ { next } \
+	   /^jobs:[[:space:]]*(#.*)?$$/ { injobs = 1; next } \
+	   injobs && /^[^[:space:]]/ { done_job(); injobs = 0; next } \
+	   !injobs { next } \
+	   { \
+	     n = lead($$0); \
+	     if (ji < 0) ji = n; \
+	     if (n == ji) { \
+	       done_job(); k = $$0; sub(/^ */, "", k); sub(/:.*/, "", k); \
+	       job = k; jfile = FILENAME; total++; next \
+	     } \
+	     if (job == "") next; \
+	     if (ai < 0) ai = n; \
+	     if (n != ai) next; \
+	     if ($$0 ~ /^ *timeout-minutes:/) has_t = 1; \
+	     if ($$0 ~ /^ *uses:/) has_u = 1; \
+	   } \
+	   END { done_job(); print "TOTAL " total + 0 } \
+	 ' $$files); \
+	 total=$$(printf '%s\n' "$$out" | sed -n 's/^TOTAL //p'); \
+	 missing=$$(printf '%s\n' "$$out" | grep -v '^TOTAL ' || true); \
+	 if [ "$$total" -eq 0 ]; then \
+	     echo "ERROR: workflows exist but no job was parsed under \`jobs:\`."; \
+	     echo "  A gate that matched nothing is indistinguishable from one that"; \
+	     echo "  passed. Fix the parse, or delete this gate deliberately."; \
+	     exit 1; \
+	 fi; \
+	 if [ -n "$$missing" ]; then \
+	     echo "ERROR: workflow jobs without timeout-minutes:"; \
+	     printf '%s\n' "$$missing" | sed 's/^/  /'; \
+	     echo ""; \
+	     echo "  A job with no ceiling hangs for GitHub's six-hour default before"; \
+	     echo "  anything reports it. Give each job a timeout-minutes that bounds"; \
+	     echo "  its real worst case (a reusable-workflow call is exempt)."; \
+	     exit 1; \
+	 fi; \
+	 echo "workflow-timeout-check: $$total job(s), each with timeout-minutes"
+
+# ── workflow-dispatch-check ─────────────────────────────────────────────────
+#
+# A workflow that runs on its own can also be started by hand (moved here
+# from just-makeit#1799 by just-makeit#1801: an org-wide rule). A run that
+# fails before any job starts -- a startup_failure -- CANNOT be re-run ("This
+# workflow run cannot be retried"). On 2026-10-02 an Actions policy change
+# made every push to jm's main fail that way, and docs.yml, on push and
+# pull_request alone, had no other way to start: Pages stayed two merges
+# stale. `workflow_dispatch` is the way back in.
+#
+# "Runs on its own" = push, pull_request, schedule or workflow_run. A purely
+# reusable workflow (workflow_call alone) never does, and is exempt. All
+# three `on:` spellings parse: a scalar, a flow list, and a block map; and a
+# walk that finds workflows but parses no trigger is refused, because a gate
+# that matched nothing is indistinguishable from one that passed.
+workflow-dispatch-check: ## Verify every self-triggered workflow can be dispatched
+	@dir=.github/workflows; \
+	 set -- $$dir/*.yml $$dir/*.yaml; \
+	 files=""; for f in "$$@"; do [ -f "$$f" ] && files="$$files $$f"; done; \
+	 if [ -z "$$files" ]; then \
+	     echo "workflow-dispatch-check: no workflows — nothing to check"; \
+	     exit 0; \
+	 fi; \
+	 out=$$(awk ' \
+	   function lead(s) { match(s, /^ */); return RLENGTH } \
+	   function add(list,   n, i, a) { \
+	     gsub(/[][,]/, " ", list); n = split(list, a, /[[:space:]]+/); \
+	     for (i = 1; i <= n; i++) if (a[i] != "") { trig[a[i]] = 1; got = 1 } \
+	   } \
+	   function verdict() { \
+	     if (file == "") return; \
+	     if (got) parsed++; \
+	     own = ("push" in trig) || ("pull_request" in trig) || \
+	           ("schedule" in trig) || ("workflow_run" in trig); \
+	     if (own && !("workflow_dispatch" in trig)) print file; \
+	     delete trig; got = 0 \
+	   } \
+	   FNR == 1 { verdict(); file = FILENAME; inon = 0; oi = -1 } \
+	   /^[[:space:]]*(#|$$)/ { next } \
+	   /^("on"|\047on\047|on|true):/ { \
+	     v = $$0; sub(/^[^:]*:[[:space:]]*/, "", v); sub(/[[:space:]]*#.*/, "", v); \
+	     if (v != "") { add(v); inon = 0 } else { inon = 1; oi = -1 } \
+	     next \
+	   } \
+	   inon && /^[^[:space:]]/ { inon = 0; next } \
+	   inon { \
+	     n = lead($$0); if (oi < 0) oi = n; if (n != oi) next; \
+	     v = $$0; sub(/^ *(- *)?/, "", v); sub(/[:[:space:]#].*/, "", v); add(v) \
+	   } \
+	   END { verdict(); print "PARSED " parsed + 0 } \
+	 ' $$files); \
+	 parsed=$$(printf '%s\n' "$$out" | sed -n 's/^PARSED //p'); \
+	 missing=$$(printf '%s\n' "$$out" | grep -v '^PARSED ' || true); \
+	 if [ "$$parsed" -eq 0 ]; then \
+	     echo "ERROR: workflows exist but no \`on:\` trigger was parsed."; \
+	     echo "  A gate that matched nothing is indistinguishable from one that"; \
+	     echo "  passed. Fix the parse, or delete this gate deliberately."; \
+	     exit 1; \
+	 fi; \
+	 if [ -n "$$missing" ]; then \
+	     echo "ERROR: workflows that run on their own but cannot be dispatched:"; \
+	     printf '%s\n' "$$missing" | sed 's/^/  /'; \
+	     echo ""; \
+	     echo "  A run that fails at startup cannot be re-run, so without"; \
+	     echo "  \`workflow_dispatch:\` there is no way to redo it short of"; \
+	     echo "  another push. Add it to each workflow's \`on:\`."; \
+	     exit 1; \
+	 fi; \
+	 echo "workflow-dispatch-check: $$parsed workflow(s); each that runs on its own can be dispatched"
 
 # ── hook-stage-check ────────────────────────────────────────────────────────
 #
