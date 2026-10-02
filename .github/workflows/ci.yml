@@ -4,6 +4,9 @@ on:
   push:
     branches: ["main"]
   pull_request:
+  # A run that fails at startup cannot be re-run; this is the way back in
+  # (workflow-dispatch-check, just-makeit#1801).
+  workflow_dispatch:
 
 # Force uv to use managed (python-build-standalone) interpreters. Under
 # setup-uv@v8, `uv run -p X` on macOS would otherwise select the Xcode system
@@ -24,6 +27,7 @@ jobs:
   # could not pass while CI was green.
   lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6.0.2
         with:
@@ -38,6 +42,7 @@ jobs:
 
   test:
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest, ubuntu-24.04-arm]
@@ -57,6 +62,7 @@ jobs:
 
   test-bazel:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     strategy:
       matrix:
         python-version: ["3.8", "3.9", "3.10", "3.11", "3.12", "3.13", "3.14"]
@@ -70,6 +76,7 @@ jobs:
 
   test-just-makeit:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     strategy:
       matrix:
         # just-makeit (the scaffolding CLI) requires Python >=3.11 and its
@@ -87,6 +94,7 @@ jobs:
 
   test-windows-ucrt64:
     runs-on: windows-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6.0.2
       - uses: msys2/setup-msys2@v2
@@ -138,6 +146,7 @@ jobs:
     # nothing produced and no pull request could merge.
     needs: ci-passed
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     if: |
       github.event_name == 'push' && github.ref == 'refs/heads/main' &&
       !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled')
