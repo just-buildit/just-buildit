@@ -299,18 +299,21 @@ class TestNestedExample(unittest.TestCase):
 class TestJustMakeitExample(unittest.TestCase):
     """just-makeit scaffolding: scaffold, verify layout, build, import."""
 
-    # Files that must exist after `just-makeit new my_dsp --object gain ...`
+    # Files that must exist after `just-makeit new my_dsp --object gain ...`,
+    # in the layout of the jm that ci.yml pins. jm 0.90.0 (gh-1583) moved
+    # every header under native/inc/<pkg>/ and named the .pc template after
+    # the package (my_dsp, not my-dsp); bump this list with the pin.
     _EXPECTED_FILES: ClassVar[list[str]] = [
         "just-makeit.toml",
         "CMakeLists.txt",
         "Makefile",
         "pyproject.toml",
         "README.md",
-        "cmake/my-dsp.pc.in",
-        "native/inc/clib_common.h",
-        "native/inc/pyex_common.h",
-        "native/inc/my_dsp.h",
-        "native/inc/gain/gain_core.h",
+        "cmake/my_dsp.pc.in",
+        "native/inc/my_dsp/clib_common.h",
+        "native/inc/my_dsp/pyex_common.h",
+        "native/inc/my_dsp/my_dsp.h",
+        "native/inc/my_dsp/gain/gain_core.h",
         "native/src/my_dsp_lib.c",
         "native/src/gain/gain_core.c",
         "native/src/gain/gain_ext.c",

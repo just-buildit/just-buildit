@@ -89,7 +89,11 @@ jobs:
       - uses: astral-sh/setup-uv@v8.1.0
         with:
           python-version: ${{ matrix.python-version }}
-      - run: uv tool install just-makeit
+      # Pinned: unpinned, a jm release that changed the scaffold layout
+      # (0.90.0 moved headers under native/inc/<pkg>/) reddened this job
+      # with no change here. Moving the pin is a reviewed PR that updates
+      # tests/test_examples.py's _EXPECTED_FILES with it.
+      - run: uv tool install just-makeit==0.97.0
       - run: uv run --no-project -p ${{ matrix.python-version }} --with pip --with numpy python -m unittest tests.test_examples.TestJustMakeitExample -v
 
   test-windows-ucrt64:
