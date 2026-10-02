@@ -43,7 +43,7 @@
 # all, so its targets do not exist and `help` does not list them):
 #
 #   HAS_C HAS_PYTHON HAS_RUST HAS_DOCS HAS_DOXYGEN HAS_BENCH HAS_COVERAGE
-#   HAS_RELEASE HAS_CHANGELOG HAS_EXAMPLES
+#   HAS_RELEASE HAS_CHANGELOG HAS_EXAMPLES HAS_CI_IMAGE HAS_PR_WATCH
 #
 # A command variable either has a universally correct default (`TEST_RUST_CMD`
 # is `cargo test`) or is REQUIRED once its flag is on — see "Required
@@ -798,6 +798,35 @@ coverage-gate: ## Fail when coverage falls below the threshold
 	$(COVERAGE_GATE_CMD)
 endif
 
+# ── HAS_PR_WATCH ─────────────────────────────────────────────────────────────
+# `make pr-watch PR=<n>` reports what a PR's checks did: landed, genuinely
+# failing, or stuck in a way waiting cannot fix. It is NOT the merge gate --
+# `gh pr merge --auto` is, server-side -- and it never merges or cancels.
+#
+# A target here rather than one per repo, for the reason VENDORED_FILES walks
+# a list: two repos each wrote `pr-watch` around the same script, one vendored
+# it and the other kept a hand copy, and the copy silently missed both the
+# REPO derivation and the stuck-queued-run detector
+# (just-buildit/just-makeit#1818). The flag vendors the script it runs, so the
+# target and its file cannot come apart.
+#
+# A flag rather than always-on: a repo that already defines its own
+# `pr-watch` takes the standard one when it drops its own, not as an
+# `overriding recipe` warning on its next re-vendor.
+#
+# Nothing to configure. REPO derives from the origin remote, and ADVISORY,
+# TIMEOUT_MIN, INTERVAL and QUIET are read from the environment, which is
+# where make puts a command-line variable: `make pr-watch PR=12
+# TIMEOUT_MIN=90` reaches the script. Its header documents each.
+ifeq ($(HAS_PR_WATCH),1)
+STD_TARGETS    += pr-watch
+VENDORED_FILES += scripts/pr-watch.sh
+
+pr-watch: ## PR=<n> — report whether a PR landed or is genuinely failing (never merges)
+	@test -n '$(PR)' || { echo "usage: make pr-watch PR=<number>"; exit 2; }
+	@bash scripts/pr-watch.sh '$(PR)'
+endif
+
 # ── HAS_RELEASE ──────────────────────────────────────────────────────────────
 # The release workflow, in dependency order: release-branch (bump on a branch)
 # -> PR -> merge -> tag-release -> release-watch, with `ship` doing the last
@@ -1220,6 +1249,91 @@ test-examples: ## Run the end-to-end example builds
 	$(TEST_EXAMPLES_CMD)
 endif
 
+# ── CI toolchain image (HAS_CI_IMAGE) ────────────────────────────────────────
+# The Linux CI jobs run in one image per base, built from the vendored
+# docker/ci.Dockerfile and pinned by digest in CI_IMAGE_PIN, with every input
+# it was built from (apt snapshot, base digests, the just-bashit installer
+# release) pinned beside it -- so a rebuild reproduces it, and the toolchain a
+# PR is tested with moves only when a commit says so. The vendored
+# .github/workflows/ci-image.yml refreshes the inputs weekly and repins only
+# when the package FINGERPRINT or the image's sources moved. Why each pin
+# exists: scripts/ci-image.py's docstring.
+#
+#   CI_IMAGE_REPO          the registry repository, e.g. ghcr.io/<org>/<repo>-ci
+#   CI_IMAGE_BASES         base images, one image each (pin keys from digits)
+#   CI_IMAGE_GROUPS        bootstrap.toml groups the image installs
+#   CI_IMAGE_SMOKE_TARGET  a make target run INSIDE each new image, on both
+#                          arches, before it is pinned; empty runs none
+#   CI_IMAGE_LANDING       pr: open a repin PR (the org lets Actions);
+#                          branch: push ci/repin-image and stop (it doesn't)
+#   CI_IMAGE_CI_WORKFLOW   the workflow a repin dispatches, since a push or PR
+#                          made with GITHUB_TOKEN starts none
+#   CI_IMAGE_USER          the uid ci-shell runs as (the runner's is 1001)
+#
+# The project's own extras -- a tool no package manager has -- go in an
+# optional docker/ci-extra.sh, whose --fingerprint lines join the fingerprint.
+ifeq ($(HAS_CI_IMAGE),1)
+STD_TARGETS += ci-image-config ci-image-check ci-image-build ci-image-smoke \
+               ci-shell
+
+CI_IMAGE_REPO         ?=
+CI_IMAGE_BASES        ?= ubuntu:24.04
+CI_IMAGE_GROUPS       ?= dev
+CI_IMAGE_SMOKE_TARGET ?=
+CI_IMAGE_LANDING      ?= pr
+CI_IMAGE_CI_WORKFLOW  ?= ci.yml
+CI_IMAGE_USER         ?= 1001
+CI_IMAGE_PIN          := .github/ci-images.env
+VENDORED_FILES        += scripts/ci-image.py docker/ci.Dockerfile \
+                         .github/workflows/ci-image.yml
+-include $(CI_IMAGE_PIN)
+
+$(call _std_require,CI_IMAGE_REPO,HAS_CI_IMAGE)
+
+_std_ci_image = CI_IMAGE_BASES='$(CI_IMAGE_BASES)' python3 scripts/ci-image.py
+
+# Offline: the pin is complete, well formed, and built from this tree's
+# image sources. So it hangs off `lint` -- a PR that edits the Dockerfile,
+# docker/ci-extra.sh or bootstrap.toml cannot merge on the old image.
+lint: ci-image-check
+
+ci-image-check: ## Fail unless CI_IMAGE_PIN pins an image built from this tree
+	@$(_std_ci_image) check
+
+# What the workflow reads, so the Makefile is the one place these are set.
+ci-image-config: ## Print the CI image settings as KEY=VALUE (plumbing)
+	@printf '%s\n' 'repo=$(CI_IMAGE_REPO)' 'bases=$(CI_IMAGE_BASES)' \
+	    'groups=$(CI_IMAGE_GROUPS)' 'smoke=$(CI_IMAGE_SMOKE_TARGET)' \
+	    'landing=$(CI_IMAGE_LANDING)' 'ci_workflow=$(CI_IMAGE_CI_WORKFLOW)'
+
+# Builds the FIRST base for this machine's arch from the PINNED inputs, so a
+# local image is the pinned one. BASE=<image> picks another listed base.
+ci-image-build: ## [BASE=<image>] Build a CI image locally from the pinned inputs
+	@base='$(or $(BASE),$(firstword $(CI_IMAGE_BASES)))'; \
+	 k=$$($(_std_ci_image) key "$$base"); \
+	 eval "$$($(_std_ci_image) inputs)"; \
+	 ref=$$(eval echo "\$$CI_BASE_$$k"); \
+	 docker buildx build --load -f docker/ci.Dockerfile \
+	   --build-arg BASE="$$ref" --build-arg APT_SNAPSHOT="$$CI_APT_SNAPSHOT" \
+	   --build-arg JB_VERSION="$$CI_JB_VERSION" \
+	   --build-arg JB_SHA256="$$CI_JB_SHA256" \
+	   --build-arg CI_IMAGE_GROUPS='$(CI_IMAGE_GROUPS)' \
+	   -t "ci-image:$$k" .
+
+# Run INSIDE an image (IMAGE=<ref>), as CI_IMAGE_USER, on this checkout.
+ci-image-smoke: ## IMAGE=<ref> Run CI_IMAGE_SMOKE_TARGET inside an image
+	@test -n '$(IMAGE)' || { echo "usage: make ci-image-smoke IMAGE=<ref>"; exit 1; }
+	docker run --rm --user $(CI_IMAGE_USER) -v "$$PWD":/w -w /w '$(IMAGE)' \
+	  bash -c 'cc --version | head -1 && git --version && \
+	    $(if $(CI_IMAGE_SMOKE_TARGET),make $(CI_IMAGE_SMOKE_TARGET),true)'
+
+ci-shell: ## [BASE=<image>] A shell in the pinned CI image, this checkout at /w
+	@k=$$($(_std_ci_image) key '$(or $(BASE),$(firstword $(CI_IMAGE_BASES)))'); \
+	 ref=$$(grep "^CI_IMAGE_$$k=" $(CI_IMAGE_PIN) | cut -d= -f2); \
+	 test -n "$$ref" || { echo "no pinned image for key $$k"; exit 1; }; \
+	 docker run --rm -it --user $(CI_IMAGE_USER) -v "$$PWD":/w -w /w "$$ref" bash
+endif
+
 # ── Gates ────────────────────────────────────────────────────────────────────
 # Three invariants that review has been shown not to catch, each failing rather
 # than warning. A gate that cannot run has not passed.
@@ -1377,17 +1491,19 @@ _STD_SECTION = case "$$t" in \
     bench|bench-save|bench-compare) tsec="Bench";; \
     coverage|coverage-gate) tsec="Coverage";; \
     bump-version|version-check|release-branch|tag-release|release-watch \
-        |ship|ci-changes|ci-tree-tested|ci-docs) tsec="Release";; \
+        |ship|ci-changes|ci-tree-tested|ci-docs|pr-watch) tsec="Release";; \
     changelog-check|changelog-sections-check|changelog-assemble \
         |changelog-assembled-check) tsec="Changelog";; \
     test-examples) tsec="Examples";; \
+    ci-image-config|ci-image-check|ci-image-build|ci-image-smoke|ci-shell) \
+        tsec="CI-image";; \
     standard-check|standard-update|standard-files|help-check|ghost-check|hook-dispatch-check|hook-stage-check|tracked-paths-check|workflow-timeout-check|workflow-dispatch-check) \
         tsec="Gates";; \
     *) tsec="Local";; \
 esac
 
 _STD_SECTION_ORDER = Core Lint Aggregates C Python Rust Docs Doxygen Bench \
-                      Coverage Release Changelog Examples Gates Local
+                      Coverage Release Changelog Examples CI-image Gates Local
 
 # Drift. Fetches canonical EVERY time, with no cache: a cache would mean the
 # most likely failure — the fetch failing while the network is fine (CDN
