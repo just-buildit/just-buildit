@@ -1266,7 +1266,7 @@ tracked-paths-check: ## Tracked paths are typeable, and none differ only in case
 	 fi; \
 	 echo "tracked-paths-check: $$(git ls-files | grep -c .) tracked path(s), every name typeable, none differ only in case"
 
-STD_TARGETS += standard-check standard-update help-check ghost-check hook-dispatch-check
+STD_TARGETS += standard-check standard-update standard-files help-check ghost-check hook-dispatch-check
 STD_TARGETS += hook-stage-check tracked-paths-check workflow-timeout-check \
                workflow-dispatch-check
 
@@ -1381,7 +1381,7 @@ _STD_SECTION = case "$$t" in \
     changelog-check|changelog-sections-check|changelog-assemble \
         |changelog-assembled-check) tsec="Changelog";; \
     test-examples) tsec="Examples";; \
-    standard-check|standard-update|help-check|ghost-check|hook-dispatch-check|hook-stage-check|tracked-paths-check|workflow-timeout-check|workflow-dispatch-check) \
+    standard-check|standard-update|standard-files|help-check|ghost-check|hook-dispatch-check|hook-stage-check|tracked-paths-check|workflow-timeout-check|workflow-dispatch-check) \
         tsec="Gates";; \
     *) tsec="Local";; \
 esac
@@ -1415,6 +1415,15 @@ _STD_SECTION_ORDER = Core Lint Aggregates C Python Rust Docs Doxygen Bench \
 # restating either, so the two cannot disagree about what is vendored or where
 # it comes from. It re-runs the check afterwards: a fetch that leaves the tree
 # still drifted has not updated anything, and saying so is the point.
+# Every path this repo holds verbatim from canonical: standard.mk plus
+# VENDORED_FILES, one per line. Plumbing for the adopter bot
+# (notify-adopters.yml), which stages exactly these and nothing else a
+# checkout happens to hold (just-buildit.github.io#84); the list is read from
+# the repo's own make, because its Makefile is the only thing that knows
+# what it vendors.
+standard-files: ## Print standard.mk and every vendored file (plumbing)
+	@printf '%s\n' $(STANDARD_FILE) $(VENDORED_FILES)
+
 standard-update: ## Re-fetch every vendored file from canonical
 	@if [ -z "$(STANDARD_URL)" ]; then \
 	    echo "standard-update: STANDARD_URL is empty — nothing is vendored"; \
@@ -1481,6 +1490,9 @@ standard-check: ## Verify every vendored file matches canonical
 	        echo ""; \
 	        echo "  Vendored files are verbatim. Per-repo variation is"; \
 	        echo "  configuration in the Makefile; change canonical, not this."; \
+	        echo "  Did not edit it? Then one of this repo's formatters rewrote"; \
+	        echo "  it (ruff, shfmt, mdformat, clang-format...). Exclude it from"; \
+	        echo "  that tool, then \`make standard-update\` to restore it (#83)."; \
 	        fail=1; continue; \
 	    fi; \
 	    rm -f "$$tmp"; \
