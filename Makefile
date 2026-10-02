@@ -165,6 +165,16 @@ RELEASE_WATCH_CMD = REPO=just-buildit/just-buildit RW_PKG=just-buildit \
 # ── Vendored from canonical ──────────────────────────────────────────────────
 # Verbatim copies the drift gate holds to canonical, alongside standard.mk
 # itself. Edit canonical and re-vendor; never edit these in place.
+# Pre-commit hooks that run their own tool rather than `make -s lint-<tool>`
+# (standard.mk's hook-dispatch-check refuses any other): six are
+# pre-commit/pre-commit-hooks' fixers and syntax checks, and uv-lock is
+# astral's own hook at its own uv pin. Each is a second source of truth for
+# how its tool runs, kept as a named exception until it gets a lint target
+# (just-makeit routed uv-lock through `make lint-uv-lock`, jm#1804). The
+# list may only shrink.
+HOOK_DISPATCH_EXEMPT = check-toml check-merge-conflict check-added-large-files \
+                       end-of-file-fixer check-yaml trailing-whitespace uv-lock
+
 VENDORED_FILES = scripts/release-watch.sh
 
 include standard.mk
