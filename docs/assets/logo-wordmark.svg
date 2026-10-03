@@ -44,8 +44,9 @@
   <text
     x="150" y="84"
     font-family="'Courier New', Courier, monospace"
-    font-size="13"
-    fill="#6b7280"
+    font-size="15"
+    font-weight="bold"
+    fill="#a3adbb"
     dominant-baseline="middle"
   >PEP 517 build backend for C extensions</text>
 
