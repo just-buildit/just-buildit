@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **Windows CPython 3.13+ wheels were tagged `cpwin_amd64`** (gh-68), which
+    pip cannot install. `SOABI` there is `cp313-win_amd64`, not
+    `cpython-313-...`; `_abi_tag` now reads both shapes, free-threaded
+    (`cp313t`) included. `tests/test_abi_tag.py` covers each shape.
+
 ### Changed
 
 - **CI tests each tree on main once.** A PR rebased onto main's tip and
