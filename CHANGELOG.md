@@ -4,10 +4,10 @@
 
 ### Fixed
 
-- **The wordmark is theme-neutral and back on the docs home page.** The SVG
-    carried a baked-in dark background, which showed as a black slab on the
-    light theme; it is now transparent with colours that read on both, and
-    the PNG the README and PyPI use is regenerated from it.
+- **The docs follow just-bashit's theme handling.** The header is the brand
+    colour in both themes (it had taken the page's, so the header and its
+    logo changed with the theme), the dark theme has its own page colours,
+    and the wordmark is its own dark panel, back on the home page.
 
 ## [0.6.2] — 2026-10-03
 

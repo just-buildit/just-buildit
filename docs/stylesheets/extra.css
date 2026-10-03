@@ -1,7 +1,28 @@
-/* Homepage wordmark heading: docs/index.md's H1 is the wordmark image
-   itself. Center it and cap its width; the image has no background, so
-   it sits on whichever theme's page colour is showing. */
+/* Zensical's modern theme does not paint the header with the primary
+   colour: .md-header takes the page's own translucent background and text
+   colour, so the header (and the logo on it) changed with the theme. Set on
+   the header itself, it is one look in both. Same fix as just-bashit. */
+.md-header {
+  background-color: #0d1117;
+  color: #ffffff;
+}
 
+/* Links: a dark-amber on the white page, the brand amber on the dark one. */
+[data-md-color-scheme="default"] {
+  --md-typeset-a-color: #b45309;
+}
+
+[data-md-color-scheme="slate"] {
+  --md-typeset-a-color: #f59e0b;
+  --md-default-bg-color: #0d1117;
+  --md-default-bg-color--light: #161b22;
+  --md-default-bg-color--lighter: #1c2330;
+  --md-default-bg-color--lightest: #222b3a;
+  --md-code-bg-color: #090c10;
+}
+
+/* The wordmark draws its own dark panel, so it needs no frame and reads on
+   either page. docs/index.md's H1 is the image itself. */
 .md-typeset h1.md-home-wordmark {
   text-align: center;
   margin-bottom: 0.5em;
