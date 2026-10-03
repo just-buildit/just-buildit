@@ -324,6 +324,63 @@ class TestPureBuild(unittest.TestCase):
                 _meta.load(Path(tmp))
 
 
+class TestArchiveNames(unittest.TestCase):
+    """Wheel and sdist member names are '/'-separated on every OS.
+
+    A native Windows ``str(path)`` is ``demo\\sub\\mod.py``; written into a zip
+    or tar as-is, the file is not at the path a wheel (or a tar reader) means,
+    and ``import demo.sub`` fails. Runs on the Windows leg, where the bug is.
+    """
+
+    def _project(self, root: Path) -> None:
+        (root / "pyproject.toml").write_text(
+            '[build-system]\nrequires = ["just-buildit"]\n'
+            'build-backend = "just_buildit"\n\n'
+            '[project]\nname = "demo"\nversion = "0.1.0"\n\n'
+            "[tool.just-buildit]\npure = true\nrepair = false\n",
+            encoding="utf-8",
+        )
+        sub = root / "src" / "demo" / "sub"
+        sub.mkdir(parents=True)
+        (root / "src" / "demo" / "__init__.py").write_text("")
+        (sub / "__init__.py").write_text("")
+        (sub / "mod.py").write_text("X = 1\n")
+
+    def _in(self, root: Path, fn):
+        orig = os.getcwd()
+        os.chdir(root)
+        try:
+            return fn()
+        finally:
+            os.chdir(orig)
+
+    def test_wheel_names_use_forward_slashes(self):
+        with tempfile.TemporaryDirectory(prefix="jb-test-") as tmp:
+            root = Path(tmp)
+            self._project(root)
+            dist = root / "dist"
+            dist.mkdir()
+            name = self._in(root, lambda: just_buildit.build_wheel(str(dist)))
+            with zipfile.ZipFile(dist / name) as zf:
+                names = zf.namelist()
+        self.assertIn("demo/sub/mod.py", names)
+        self.assertEqual([n for n in names if "\\" in n], [])
+
+    def test_sdist_names_use_forward_slashes(self):
+        import tarfile
+
+        with tempfile.TemporaryDirectory(prefix="jb-test-") as tmp:
+            root = Path(tmp)
+            self._project(root)
+            dist = root / "dist"
+            dist.mkdir()
+            name = self._in(root, lambda: just_buildit.build_sdist(str(dist)))
+            with tarfile.open(dist / name) as tf:
+                names = tf.getnames()
+        self.assertIn("demo-0.1.0/src/demo/sub/mod.py", names)
+        self.assertEqual([n for n in names if "\\" in n], [])
+
+
 class TestBuildEnv(unittest.TestCase):
     """Verify platform-specific build environment helpers."""
 

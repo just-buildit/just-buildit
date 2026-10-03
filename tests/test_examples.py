@@ -210,6 +210,11 @@ class TestBazelExample(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
+        if platform.system() == "Windows":
+            raise unittest.SkipTest(
+                "the bazel example's genrule is gcc-flavoured; it needs a "
+                "clang-cl toolchain on Windows (just-buildit/just-buildit#75)"
+            )
         if not shutil.which("bazel"):
             raise unittest.SkipTest("bazel not found")
         cls._tmp = tempfile.mkdtemp(prefix="jb-bazel-")

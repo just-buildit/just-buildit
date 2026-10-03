@@ -277,12 +277,15 @@ def build_wheel(
         p
         for p in output_dir.rglob("*")
         if p.is_file()
-        and not _is_excluded(str(p.relative_to(output_dir)), _exclude)
+        and not _is_excluded(p.relative_to(output_dir).as_posix(), _exclude)
     )
 
     # Read each content file once; reuse the bytes for RECORD and zip writing.
+    # Archive names are always '/'-separated (as_posix), whatever the OS: a
+    # native Windows str(path) is 'pkg\\mod.py', which is not a wheel path.
     content = [
-        (str(p.relative_to(output_dir)), p.read_bytes()) for p in content_paths
+        (p.relative_to(output_dir).as_posix(), p.read_bytes())
+        for p in content_paths
     ]
 
     ext_suffix = sysconfig.get_config_var("EXT_SUFFIX") or ""

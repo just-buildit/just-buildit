@@ -2,6 +2,15 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **Wheel and sdist member names were backslash-separated on native Windows.**
+    A nested package (`demo/sub/mod.py`) went into the archive as
+    `demo\\sub\\mod.py`, so `import demo.sub` failed. Names are now always
+    `/`-separated (`as_posix`). The CMake example also converts the Windows
+    interpreter path with `file(TO_CMAKE_PATH ...)`; unconverted, its
+    backslashes were read as escapes and CMake built for a different Python.
+
 ### Changed
 
 - **Windows builds with clang-cl against native CPython; MinGW / MSYS2 is
