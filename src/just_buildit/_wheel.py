@@ -44,13 +44,26 @@ def _python_tag() -> str:
     return f"cp{v[0]}{v[1]}"
 
 
-def _abi_tag() -> str:
-    tag = sysconfig.get_config_var("SOABI")
+def _abi_tag(soabi: str | None = None) -> str:
+    """Return the wheel ABI tag for this interpreter (``cp313``, ``cp313t``).
+
+    ``SOABI`` has two spellings and the tag is in a different slot of each:
+
+    - Linux/macOS: ``cpython-312-x86_64-linux-gnu`` -- tag is ``parts[1]``.
+    - Windows, CPython >= 3.13: ``cp313-win_amd64`` -- the tag is already
+      ``parts[0]``. Reading ``parts[1]`` here gave ``cpwin_amd64`` (gh-68).
+
+    Windows before 3.13 has no ``SOABI`` at all, and falls through to the
+    python tag. ``soabi`` is a parameter only so every shape can be tested
+    on one machine; callers pass nothing.
+    """
+    tag = sysconfig.get_config_var("SOABI") if soabi is None else soabi
     if tag:
-        # SOABI is like "cpython-312-x86_64-linux-gnu"; we want "cp312"
         parts = tag.split("-")
-        if len(parts) >= 2:
+        if parts[0] == "cpython" and len(parts) >= 2:
             return f"cp{parts[1]}"
+        if re.fullmatch(r"cp\d+t?", parts[0]):
+            return parts[0]
     return _python_tag()
 
 
