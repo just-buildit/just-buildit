@@ -5,6 +5,12 @@
 .md-header {
   background-color: #0d1117;
   color: #ffffff;
+  /* The search box inside it reads the page's foreground variables, which
+     are dark in the light scheme: dark text on a dark header. Scoped to
+     the header, so nothing below it changes. */
+  --md-default-fg-color: #ffffff;
+  --md-default-fg-color--light: rgba(255, 255, 255, 0.72);
+  --md-default-fg-color--lighter: rgba(255, 255, 255, 0.5);
 }
 
 /* Links: a dark-amber on the white page, the brand amber on the dark one. */
