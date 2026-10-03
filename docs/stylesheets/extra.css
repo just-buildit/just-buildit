@@ -1,23 +1,20 @@
 /* Zensical's modern theme does not paint the header with the primary
    colour: .md-header takes the page's own translucent background and text
-   colour, so the header (and the logo on it) changed with the theme. Set on
-   the header itself, it is one look in both. Same fix as just-bashit. */
+   colour, so the header (and the logo on it) did not match the brand. Set on
+   the header itself, it is one look. Same fix as just-bashit. */
 .md-header {
   background-color: #0d1117;
   color: #ffffff;
-  /* The search box inside it reads the page's foreground variables, which
-     are dark in the light scheme: dark text on a dark header. Scoped to
-     the header, so nothing below it changes. */
+  /* The search box inside it reads the page's foreground variables; pin
+     them light so its text and magnifier stay legible on this header.
+     Scoped to the header, so nothing below it changes. */
   --md-default-fg-color: #ffffff;
   --md-default-fg-color--light: rgba(255, 255, 255, 0.72);
   --md-default-fg-color--lighter: rgba(255, 255, 255, 0.5);
 }
 
-/* Links: a dark-amber on the white page, the brand amber on the dark one. */
-[data-md-color-scheme="default"] {
-  --md-typeset-a-color: #b45309;
-}
-
+/* Dark only (zensical.toml has the one palette), so the scheme rule below
+   is the only one: brand amber links on the dark page colours. */
 [data-md-color-scheme="slate"] {
   --md-typeset-a-color: #f59e0b;
   --md-default-bg-color: #0d1117;

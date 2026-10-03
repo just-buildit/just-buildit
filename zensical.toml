@@ -53,16 +53,10 @@ features = [
   "search.highlight",
 ]
 
-# Dark mode first
+# Dark only: one palette, so there is no toggle. The brand colours (the
+# wordmark panel, the amber) are drawn for a dark page.
 [[project.theme.palette]]
-scheme      = "slate"
-toggle.icon = "lucide/moon"
-toggle.name = "Switch to light mode"
-
-[[project.theme.palette]]
-scheme      = "default"
-toggle.icon = "lucide/sun"
-toggle.name = "Switch to dark mode"
+scheme = "slate"
 
 # ----------------------------------------------------------------------------
 # Social links
