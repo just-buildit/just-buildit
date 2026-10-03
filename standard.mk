@@ -1074,7 +1074,12 @@ ci-check-name: ## Print CI_CHECK_NAME, the aggregate check's name
 #   - gated: it `needs:` that job and its text reads `needs.<id>.outputs`;
 #   - the aggregator, the job whose `name:` is CI_CHECK_NAME -- it runs
 #     always() and counts a skipped matrix as passed;
-#   - after the aggregator: it `needs:` it (a mirror trigger, a deploy);
+#   - after the aggregator: it `needs:` it (a mirror trigger, a deploy) AND
+#     its `if:` says always(). Without a status function GitHub ANDs in
+#     success(), which is false when anything upstream was SKIPPED -- so on
+#     exactly the merges this gate exists for, the job never runs. All
+#     three repos' mirror triggers were skipped that way on the first
+#     skipped merges (2026-10-03), leaving the CDN on its daily cron;
 #   - declared always-run, in CI_ALWAYS_RUN_JOBS.
 #
 # Always-run is a POLICY, so it is the repo's to declare, not the gate's to
@@ -1141,7 +1146,9 @@ ci-changes-wiring-check: ## Verify GATES_CI_FILE gates every job on the vendored
 	     if (a == "") { print "NOAGG"; exit } \
 	     for (i = 1; i <= total; i++) { j = order[i]; \
 	       if (j == c || j == a || (j in isalways)) continue; \
-	       if (index(needs[j], " " a " ")) continue; \
+	       if (index(needs[j], " " a " ")) { \
+	         if (index(text[j], "always()")) continue; \
+	         print "NOALWAYS " j; continue } \
 	       if (index(needs[j], " " c " ") && index(text[j], "needs." c ".outputs")) continue; \
 	       print "UNGATED " j } \
 	   } \
@@ -1173,6 +1180,16 @@ ci-changes-wiring-check: ## Verify GATES_CI_FILE gates every job on the vendored
 	     printf '%s\n' "$$stale" | sed 's/^/  /'; \
 	     echo "  An exemption that outlives its job is granted to whatever next"; \
 	     echo "  takes the name. Drop it."; \
+	     exit 1; \
+	 fi; \
+	 noalways=$$(printf '%s\n' "$$out" | sed -n 's/^NOALWAYS //p'); \
+	 if [ -n "$$noalways" ]; then \
+	     echo "ERROR: $$ci jobs after '$(CI_CHECK_NAME)' that can never run on a skipped tree:"; \
+	     printf '%s\n' "$$noalways" | sed 's/^/  /'; \
+	     echo ""; \
+	     echo "  With no status function GitHub adds success(), false whenever"; \
+	     echo "  anything upstream was skipped -- the already-tested merges. Use"; \
+	     echo "    if: always() && needs.<aggregator-job>.result == 'success' && ..."; \
 	     exit 1; \
 	 fi; \
 	 bad=$$(printf '%s\n' "$$out" | sed -n 's/^UNGATED //p'); \
