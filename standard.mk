@@ -1074,14 +1074,25 @@ ci-check-name: ## Print CI_CHECK_NAME, the aggregate check's name
 #   - gated: it `needs:` that job and its text reads `needs.<id>.outputs`;
 #   - the aggregator, the job whose `name:` is CI_CHECK_NAME -- it runs
 #     always() and counts a skipped matrix as passed;
-#   - after the aggregator: it `needs:` it (a mirror trigger, a deploy).
+#   - after the aggregator: it `needs:` it (a mirror trigger, a deploy);
+#   - declared always-run, in CI_ALWAYS_RUN_JOBS.
+#
+# Always-run is a POLICY, so it is the repo's to declare, not the gate's to
+# forbid: doppler runs its image pin, pre-commit and manifest drift on every
+# tree, version bumps included, on purpose (2026-10-03, when this gate first
+# shipped without the exemption and turned every doppler PR red). A declared
+# name that is not a job in GATES_CI_FILE is refused, so the list cannot
+# outlive the jobs it excuses. Set it with the reason beside it.
 #
 # Anything else re-runs on a tree CI already tested, which is the waste this
 # exists to stop, and is named. No call, no aggregator, or a file that parses
 # no job at all is refused: a gate that matched nothing is indistinguishable
 # from one that passed. POSIX awk with learned indentation, like
-# workflow-timeout-check; `needs:` is read inline, as a flow list, or as a
+# workflow-timeout-check; `needs:` is read inline, as a flow list (on its
+# line or the next -- just-buildit's aggregator writes it that way), or as a
 # block list.
+CI_ALWAYS_RUN_JOBS ?=
+
 lint: ci-changes-wiring-check
 
 ci-changes-wiring-check: ## Verify GATES_CI_FILE gates every job on the vendored changes job
@@ -1090,7 +1101,7 @@ ci-changes-wiring-check: ## Verify GATES_CI_FILE gates every job on the vendored
 	     echo "ci-changes-wiring-check: no $$ci — nothing to check"; \
 	     exit 0; \
 	 fi; \
-	 out=$$(awk -v agg='$(CI_CHECK_NAME)' ' \
+	 out=$$(awk -v agg='$(CI_CHECK_NAME)' -v always='$(CI_ALWAYS_RUN_JOBS)' ' \
 	   function lead(s) { match(s, /^ */); return RLENGTH } \
 	   function val(s) { sub(/^[^:]*:[[:space:]]*/, "", s); sub(/[[:space:]]+#.*$$/, "", s); \
 	                     gsub(/^["\047]|["\047]$$/, "", s); return s } \
@@ -1115,17 +1126,21 @@ ci-changes-wiring-check: ## Verify GATES_CI_FILE gates every job on the vendored
 	       else if ($$0 ~ /^ *needs:/) { v = val($$0); if (v == "") inneeds = 1; else addneeds(job, v) } \
 	       next \
 	     } \
-	     if (inneeds && $$0 ~ /^ *- /) { v = $$0; sub(/^ *- */, "", v); addneeds(job, v) } \
+	     if (inneeds) { v = $$0; sub(/^ *(- *)?/, "", v); addneeds(job, v) } \
 	   } \
 	   END { \
 	     print "TOTAL " total + 0; \
+	     na = split(always, al, /[[:space:]]+/); \
+	     for (i = 1; i <= na; i++) if (al[i] != "") isalways[al[i]] = 1; \
+	     for (i = 1; i <= total; i++) seen[order[i]] = 1; \
+	     for (k in isalways) if (!(k in seen)) print "STALE " k; \
 	     for (i = 1; i <= total; i++) { j = order[i]; \
 	       if (uses[j] ~ /^\.\/\.github\/workflows\/changes\.ya?ml$$/) c = j; \
 	       if (nm[j] == agg) a = j } \
 	     if (c == "") { print "NOCALL"; exit } \
 	     if (a == "") { print "NOAGG"; exit } \
 	     for (i = 1; i <= total; i++) { j = order[i]; \
-	       if (j == c || j == a) continue; \
+	       if (j == c || j == a || (j in isalways)) continue; \
 	       if (index(needs[j], " " a " ")) continue; \
 	       if (index(needs[j], " " c " ") && index(text[j], "needs." c ".outputs")) continue; \
 	       print "UNGATED " j } \
@@ -1152,6 +1167,14 @@ ci-changes-wiring-check: ## Verify GATES_CI_FILE gates every job on the vendored
 	     echo "  The aggregator is what turns a skipped matrix into a pass."; \
 	     exit 1; \
 	 fi; \
+	 stale=$$(printf '%s\n' "$$out" | sed -n 's/^STALE //p'); \
+	 if [ -n "$$stale" ]; then \
+	     echo "ERROR: CI_ALWAYS_RUN_JOBS names jobs $$ci does not have:"; \
+	     printf '%s\n' "$$stale" | sed 's/^/  /'; \
+	     echo "  An exemption that outlives its job is granted to whatever next"; \
+	     echo "  takes the name. Drop it."; \
+	     exit 1; \
+	 fi; \
 	 bad=$$(printf '%s\n' "$$out" | sed -n 's/^UNGATED //p'); \
 	 if [ -n "$$bad" ]; then \
 	     echo "ERROR: $$ci jobs that ignore the changes job:"; \
@@ -1160,10 +1183,13 @@ ci-changes-wiring-check: ## Verify GATES_CI_FILE gates every job on the vendored
 	     echo "  Each re-runs on a tree CI already tested. Give it"; \
 	     echo "    needs: [changes, ...]"; \
 	     echo "    if: needs.changes.outputs.src == 'true'"; \
-	     echo "  or make it need the '$(CI_CHECK_NAME)' job if it belongs after CI."; \
+	     echo "  or make it need the '$(CI_CHECK_NAME)' job if it belongs after CI,"; \
+	     echo "  or, if it must run on every tree by policy, name it in"; \
+	     echo "  CI_ALWAYS_RUN_JOBS (Makefile) with the reason beside it."; \
 	     exit 1; \
 	 fi; \
-	 echo "ci-changes-wiring-check: $$total job(s) in $$ci, each gated on changes"
+	 ex=$$(echo $(CI_ALWAYS_RUN_JOBS) | wc -w); \
+	 echo "ci-changes-wiring-check: $$total job(s) in $$ci, each gated on changes; $$ex declared always-run"
 
 # The explicit origin/main start point matters: a bare `checkout -b` forks from
 # whatever HEAD the invoker happens to be on (a feature branch, a stale main),
