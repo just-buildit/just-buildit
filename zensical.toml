@@ -27,7 +27,7 @@ nav = [
 # ----------------------------------------------------------------------------
 [project.theme]
 logo     = "assets/logo.svg"
-favicon  = "assets/logo.svg"
+favicon  = "assets/favicon.svg"
 language = "en"
 
 [project.theme.font]
