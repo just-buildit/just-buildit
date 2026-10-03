@@ -325,11 +325,13 @@ class TestPureBuild(unittest.TestCase):
 
 
 class TestArchiveNames(unittest.TestCase):
-    """Wheel and sdist member names are '/'-separated on every OS.
+    """Wheel RECORD paths and sdist member names are '/'-separated.
 
-    A native Windows ``str(path)`` is ``demo\\sub\\mod.py``; written into a zip
-    or tar as-is, the file is not at the path a wheel (or a tar reader) means,
-    and ``import demo.sub`` fails. Runs on the Windows leg, where the bug is.
+    A native Windows ``str(path)`` is ``demo\\sub\\mod.py``. ``zipfile``
+    normalises that for the archive entry itself, but the RECORD row (written
+    from the same string) and a tar member name are not, so they would name a
+    path that does not exist in the archive. Runs on the Windows leg, where
+    the bug is.
     """
 
     def _project(self, root: Path) -> None:
@@ -363,8 +365,11 @@ class TestArchiveNames(unittest.TestCase):
             name = self._in(root, lambda: just_buildit.build_wheel(str(dist)))
             with zipfile.ZipFile(dist / name) as zf:
                 names = zf.namelist()
+                record = zf.read("demo-0.1.0.dist-info/RECORD").decode()
         self.assertIn("demo/sub/mod.py", names)
         self.assertEqual([n for n in names if "\\" in n], [])
+        self.assertIn("demo/sub/mod.py,", record)
+        self.assertNotIn("\\", record)
 
     def test_sdist_names_use_forward_slashes(self):
         import tarfile

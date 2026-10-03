@@ -27,6 +27,12 @@ endif()
 if(DEFINED ENV{JUST_BUILDIT_INCLUDE_DIR})
     file(TO_CMAKE_PATH "$ENV{JUST_BUILDIT_INCLUDE_DIR}" Python3_INCLUDE_DIR)
 endif()
+# Windows only: JUST_BUILDIT_LIBS is the python3X.lib path (empty elsewhere),
+# and Development.Module wants the import library as well as the headers.
+# Without it the search falls through to whatever Python it finds first.
+if(NOT "$ENV{JUST_BUILDIT_LIBS}" STREQUAL "")
+    file(TO_CMAKE_PATH "$ENV{JUST_BUILDIT_LIBS}" Python3_LIBRARY)
+endif()
 find_package(Python3 COMPONENTS Development.Module REQUIRED)
 Python3_add_library(add MODULE src/add.c)
 set_target_properties(add PROPERTIES

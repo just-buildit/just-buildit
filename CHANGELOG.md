@@ -4,12 +4,15 @@
 
 ### Fixed
 
-- **Wheel and sdist member names were backslash-separated on native Windows.**
-    A nested package (`demo/sub/mod.py`) went into the archive as
-    `demo\\sub\\mod.py`, so `import demo.sub` failed. Names are now always
-    `/`-separated (`as_posix`). The CMake example also converts the Windows
-    interpreter path with `file(TO_CMAKE_PATH ...)`; unconverted, its
-    backslashes were read as escapes and CMake built for a different Python.
+- **A wheel's RECORD and an sdist's member names were backslash-separated on
+    native Windows**, naming paths (`demo\sub\mod.py`) that are not in the
+    archive. They are now always `/`-separated. Build commands also receive
+    `JUST_BUILDIT_OUTPUT_DIR`, `_INCLUDE_DIR` and `_PYTHON` with `/`, because a
+    `C:\Users\...` path loses its backslashes as escapes in an unquoted
+    `sh` command, so `examples/nested` copied its `.py` files to a garbage
+    path. The CMake example now passes `JUST_BUILDIT_LIBS` as `Python3_LIBRARY`
+    and converts the paths with `file(TO_CMAKE_PATH ...)`; without them
+    CMake built for whichever Python it found first.
 
 ### Changed
 

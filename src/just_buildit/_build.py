@@ -243,12 +243,16 @@ def _make_env(*, name: str, output_dir: Path) -> tuple[dict[str, str], str]:
             "Could not determine extension suffix via sysconfig."
         )
     env = os.environ.copy()
+    # Paths are handed over '/'-separated (as_posix, a no-op off Windows): a
+    # build command usually runs them through make and sh, where an unquoted
+    # C:\\Users\\... loses its backslashes as escapes and the files land in a
+    # garbage relative path. Windows and clang-cl accept '/' everywhere.
     env.update(
         {
             "JUST_BUILDIT_NAME": name,
-            "JUST_BUILDIT_PYTHON": sys.executable,
-            "JUST_BUILDIT_INCLUDE_DIR": include_dir,
-            "JUST_BUILDIT_OUTPUT_DIR": str(output_dir),
+            "JUST_BUILDIT_PYTHON": Path(sys.executable).as_posix(),
+            "JUST_BUILDIT_INCLUDE_DIR": Path(include_dir).as_posix(),
+            "JUST_BUILDIT_OUTPUT_DIR": output_dir.as_posix(),
             "JUST_BUILDIT_EXT_SUFFIX": ext_suffix,
             "JUST_BUILDIT_LDFLAGS": " ".join(_ldflags()),
             "JUST_BUILDIT_LIBS": "",
