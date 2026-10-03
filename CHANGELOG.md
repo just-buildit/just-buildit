@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.6.2] — 2026-10-03
+
 ### Fixed
 
 - **Windows CPython 3.13+ wheels were tagged `cpwin_amd64`** (gh-68), which
