@@ -8,6 +8,7 @@ site_name        = "just-buildit"
 site_description = "The missing PEP 517 build backend for C extensions."
 site_url         = "https://just-buildit.github.io/just-buildit/"
 repo_url         = "https://github.com/just-buildit/just-buildit"
+extra_css        = ["stylesheets/extra.css"]
 copyright        = "Copyright &copy; 2026 just-buildit contributors — MIT License"
 
 nav = [

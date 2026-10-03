@@ -1,0 +1,13 @@
+/* Homepage wordmark heading: docs/index.md's H1 is the wordmark image
+   itself. Center it and cap its width; the image has no background, so
+   it sits on whichever theme's page colour is showing. */
+
+.md-typeset h1.md-home-wordmark {
+  text-align: center;
+  margin-bottom: 0.5em;
+}
+
+.md-typeset h1.md-home-wordmark img {
+  width: 540px;
+  max-width: 100%;
+}

@@ -1,4 +1,4 @@
-# just-buildit
+# ![just-buildit](assets/logo-wordmark.png) { .md-home-wordmark }
 
 The missing [PEP 517](https://peps.python.org/pep-0517/) build backend for C extensions.
 
