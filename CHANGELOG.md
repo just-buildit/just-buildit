@@ -2,6 +2,14 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **CI tests each tree on main once.** A PR rebased onto main's tip and
+    green merges without re-running the matrix: ci.yml asks the vendored
+    `changes` workflow (canonical), and `make ci-changes-wiring-check` keeps
+    every job waiting on it. A version bump alone skips it too, and a
+    docs-only diff skips the test jobs.
+
 ## [0.6.1] — 2026-09-22
 
 ### Fixed
