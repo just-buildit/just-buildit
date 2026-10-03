@@ -23,15 +23,20 @@ ______________________________________________________________________
 
 ### Platform-specific link flags
 
-| Variable               |      Linux      |                  macOS                  |       Windows (MinGW)        |
-| :--------------------- | :-------------: | :-------------------------------------: | :--------------------------: |
-| `JUST_BUILDIT_LDFLAGS` | `-shared -fPIC` | `-dynamiclib -undefined dynamic_lookup` |          `-shared`           |
-| `JUST_BUILDIT_LIBS`    |    *(empty)*    |                *(empty)*                | `-L/ucrt64/lib -lpython3.14` |
+| Variable               |      Linux      |                  macOS                  |             Windows (clang-cl)             |
+| :--------------------- | :-------------: | :-------------------------------------: | :----------------------------------------: |
+| `JUST_BUILDIT_LDFLAGS` | `-shared -fPIC` | `-dynamiclib -undefined dynamic_lookup` |                   `/LD`                    |
+| `JUST_BUILDIT_LIBS`    |    *(empty)*    |                *(empty)*                | `C:/Python314/libs/python314.lib` (a path) |
 
 `JUST_BUILDIT_LIBS` is only non-empty when a custom `command` is configured
-**and** the platform is Windows/MinGW — where Python's import library must be
-linked explicitly. On Linux and macOS it is always empty; `JUST_BUILDIT_LDFLAGS`
-is sufficient.
+**and** the platform is Windows — where Python's import library
+(`python3X.lib`, from the native CPython install) must be linked explicitly.
+On Linux and macOS it is always empty; `JUST_BUILDIT_LDFLAGS` is sufficient.
+
+Windows builds use **clang-cl** against native CPython (the MSVC ABI), so the
+flags are MSVC's (`/LD`, `/Fe:`, `/Fo`), not gcc's. just-buildit removes the
+`.lib` and `.exp` files `/LD` leaves beside the extension, and any `.obj`,
+before packaging. MinGW / MSYS2 Python is no longer supported.
 
 !!! warning "Link order on Linux and macOS"
 
@@ -51,7 +56,7 @@ is sufficient.
     GNU `ld` uses `--as-needed` by default on Debian/Ubuntu; any library
     that appears before the object files that reference it is silently
     dropped. This is a no-op on Linux/macOS (where `JUST_BUILDIT_LIBS` is
-    empty anyway), but the ordering habit matters on Windows/MinGW.
+    empty anyway), but the ordering habit matters on Windows.
 
 ______________________________________________________________________
 

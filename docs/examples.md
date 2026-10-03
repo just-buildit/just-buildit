@@ -11,7 +11,7 @@ pip install ./examples/cmake
 pip install ./examples/meson
 pip install ./examples/mixed
 pip install ./examples/nested
-pip install ./examples/mingw     # Windows/MSYS2 UCRT64 only
+pip install ./examples/clang-cl  # Windows only (clang-cl)
 pip install ./examples/bazel     # requires Bazel
 ```
 
@@ -455,28 +455,31 @@ clean:
 
 ______________________________________________________________________
 
-## MinGW UCRT64 (Windows)
+## Windows (clang-cl)
 
-An explicit Makefile build in the MSYS2 UCRT64 environment. The key
-difference from Linux: `JUST_BUILDIT_LIBS` is non-empty on Windows/MinGW
-(`-L<libdir> -lpython3.X`) and must appear **after** `-o` in the linker
-invocation. On Linux and macOS it is empty and the rule is a no-op either way,
-so this Makefile layout is portable.
+An explicit Makefile build with clang-cl against native CPython (the MSVC
+ABI). The key difference from Linux: `JUST_BUILDIT_LIBS` is non-empty on
+Windows — it is the path to `python3X.lib` — and, being an input file, goes
+**after** the sources. `JUST_BUILDIT_LDFLAGS` is `/LD`, MSVC's spelling of
+"build a DLL", so the compiler line uses MSVC's `/Fe:` and `/Fo` too. On
+Linux and macOS `JUST_BUILDIT_LIBS` is empty and the rule is a no-op either
+way.
 
-[Browse `examples/mingw/`](https://github.com/just-buildit/just-buildit/tree/main/examples/mingw)
+[Browse `examples/clang-cl/`](https://github.com/just-buildit/just-buildit/tree/main/examples/clang-cl)
 
-**Prerequisites** (MSYS2 UCRT64 shell):
+**Prerequisites:**
+
+- Visual Studio Build Tools with the C++ workload, and LLVM (`clang-cl`)
+- CPython from python.org or `uv python install` (not MSYS2's Python)
+- GNU `make` on `PATH`
+
+Run from an environment where clang-cl can find the MSVC toolchain, such as
+a Developer Command Prompt.
+
+**Try it:**
 
 ```sh
-pacman -S mingw-w64-ucrt-x86_64-python \
-          mingw-w64-ucrt-x86_64-gcc \
-          make
-```
-
-**Try it** (MSYS2 UCRT64 shell):
-
-```sh
-pip install ./examples/mingw
+pip install ./examples/clang-cl
 python -c "import add; print(add.add(1, 2))"
 ```
 
@@ -490,7 +493,7 @@ build-backend = "just_buildit"
 [project]
 name = "add"
 version = "0.1.0"
-description = "just-buildit MinGW UCRT64 example."
+description = "just-buildit Windows clang-cl example."
 requires-python = ">=3.8"
 
 [tool.just-buildit]
@@ -501,21 +504,37 @@ repair = false
 **`Makefile`**
 
 ```makefile
+# Windows: clang-cl against native CPython (the MSVC ABI). Run it from an
+# environment where clang-cl can find the MSVC toolchain (a Developer
+# Command Prompt, or scripts/msvc-env.sh on a CI runner).
+#
+# make's built-in CC is `cc`, which is not on a Windows PATH; an environment
+# CC still wins, so only the built-in default is replaced.
+ifeq ($(origin CC),default)
+CC := clang-cl
+endif
+
 TARGET := $(JUST_BUILDIT_OUTPUT_DIR)/add$(JUST_BUILDIT_EXT_SUFFIX)
+OBJDIR := build
 
 all: $(TARGET)
 
-# On Windows/MinGW, JUST_BUILDIT_LIBS = "-L<libdir> -lpython3.X" and must
-# come after -o. On Linux/macOS it is empty and the rule is a no-op either way.
+# clang-cl takes MSVC's spellings: /LD builds a DLL (JUST_BUILDIT_LDFLAGS),
+# /Fe: names the output and /Fo the object directory. JUST_BUILDIT_LIBS is
+# the path to python3X.lib; it is an ordinary input file, so it goes after
+# the sources. /LD also writes add*.lib and add*.exp beside the output;
+# just-buildit removes those before packaging, so they need no handling here.
 $(TARGET):
+	mkdir -p $(OBJDIR)
 	$(CC) $(JUST_BUILDIT_LDFLAGS) \
 		-I$(JUST_BUILDIT_INCLUDE_DIR) \
 		src/add/add.c \
-		-o $(TARGET) \
+		/Fo$(OBJDIR)/ \
+		/Fe:$(TARGET) \
 		$(JUST_BUILDIT_LIBS)
 
 clean:
-	rm -f src/add/add*.pyd src/add/add*.so
+	rm -rf $(OBJDIR) src/add/add*.pyd
 ```
 
 **`src/add/add.c`** — same as the zero-config example above.

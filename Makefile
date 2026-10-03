@@ -175,6 +175,6 @@ RELEASE_WATCH_CMD = REPO=just-buildit/just-buildit RW_PKG=just-buildit \
 HOOK_DISPATCH_EXEMPT = check-toml check-merge-conflict check-added-large-files \
                        end-of-file-fixer check-yaml trailing-whitespace uv-lock
 
-VENDORED_FILES = scripts/release-watch.sh
+VENDORED_FILES = scripts/release-watch.sh scripts/msvc-env.sh
 
 include standard.mk

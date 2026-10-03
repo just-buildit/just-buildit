@@ -2,6 +2,20 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **Windows builds with clang-cl against native CPython; MinGW / MSYS2 is
+    retired.** `JUST_BUILDIT_LDFLAGS` is `/LD` and `JUST_BUILDIT_LIBS` is the
+    path to `python3X.lib`, an input file for the linker, where both were gcc
+    spellings (`-shared`, `-L<dir> -lpythonX.Y`). The zero-config build calls
+    `$CC`, defaulting to `clang-cl` on Windows, with `/Fe:` and `/Fo`, and
+    just-buildit removes the `.lib` / `.exp` / `.obj` files `/LD` leaves beside
+    the extension, which would otherwise ship in every wheel. A project whose
+    own `command` hard-codes `-shared` or `-lpython` must move to the two
+    variables. `examples/mingw` is now `examples/clang-cl`, and the Windows CI
+    leg runs it under the MSVC environment (`scripts/msvc-env.sh`, vendored from
+    canonical), as just-makeit and doppler do.
+
 ## [0.6.3] — 2026-10-03
 
 ### Fixed
