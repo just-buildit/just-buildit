@@ -9,7 +9,9 @@
     logo changed with the theme), the dark theme has its own page colours,
     and the wordmark is its own dark panel, back on the home page. The browser-tab
     icon is a separate gear drawn for 16-32 px with no background square, so it
-    no longer shows the tab bar through the corners of a dark tile.
+    no longer shows the tab bar through the corners of a dark tile. The theme
+    toggle shows the current theme (a moon in the dark one, a sun in the
+    light one), as just-bashit's does; it was the other way round.
 
 ## [0.6.2] — 2026-10-03
 
