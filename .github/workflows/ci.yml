@@ -173,9 +173,10 @@ jobs:
     needs: ci-passed
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    if: |
-      github.event_name == 'push' && github.ref == 'refs/heads/main' &&
-      !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled')
+    # always(): with no status function GitHub ANDs in success(), false
+    # whenever the matrix was skipped as already tested -- this job was
+    # skipped on the first such merge (4aef41a). ci-changes-wiring-check.
+    if: always() && github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.ci-passed.result == 'success'
     steps:
       - name: Dispatch mirror refresh
         env:
