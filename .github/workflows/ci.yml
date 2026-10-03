@@ -16,6 +16,16 @@ env:
   UV_PYTHON_PREFERENCE: only-managed
 
 jobs:
+  # Has this run anything left to prove? The vendored answer (canonical,
+  # HAS_RELEASE): src=false for a tree a merged PR already passed, or a
+  # version bump alone; code=false for a docs-only diff. Every job below
+  # waits on it -- `make ci-changes-wiring-check` refuses one that does not.
+  changes:
+    uses: ./.github/workflows/changes.yml
+    permissions:
+      checks: read
+      contents: read
+
   # There was no lint job at all before this. Every pre-commit hook, every
   # drift gate and every check in `make lint` ran on NO pull request -- which
   # is worse than not having them, because the repo reads as gated.
@@ -26,6 +36,8 @@ jobs:
   # passed `--with pip --with numpy` and the Makefile did not, so `make test`
   # could not pass while CI was green.
   lint:
+    needs: changes
+    if: needs.changes.outputs.src == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -41,6 +53,8 @@ jobs:
       - run: make lint
 
   test:
+    needs: changes
+    if: needs.changes.outputs.src == 'true' && needs.changes.outputs.code != 'false'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     strategy:
@@ -61,6 +75,8 @@ jobs:
       - run: make test TEST_PYTHON=${{ matrix.python-version }}
 
   test-bazel:
+    needs: changes
+    if: needs.changes.outputs.src == 'true' && needs.changes.outputs.code != 'false'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -75,6 +91,8 @@ jobs:
       - run: uv run --no-project -p ${{ matrix.python-version }} python -m unittest tests.test_examples.TestBazelExample -v
 
   test-just-makeit:
+    needs: changes
+    if: needs.changes.outputs.src == 'true' && needs.changes.outputs.code != 'false'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
@@ -97,6 +115,8 @@ jobs:
       - run: uv run --no-project -p ${{ matrix.python-version }} --with pip --with numpy python -m unittest tests.test_examples.TestJustMakeitExample -v
 
   test-windows-ucrt64:
+    needs: changes
+    if: needs.changes.outputs.src == 'true' && needs.changes.outputs.code != 'false'
     runs-on: windows-latest
     timeout-minutes: 30
     steps:
@@ -126,8 +146,10 @@ jobs:
     name: CI passed
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # `changes` too: if it fails, nothing below it ran, and that is not a
+    # pass. A job it skipped (an already-tested tree) is `skipped`, which is.
     needs:
-      [lint, test, test-bazel, test-just-makeit, test-windows-ucrt64]
+      [changes, lint, test, test-bazel, test-just-makeit, test-windows-ucrt64]
     if: always()
     steps:
       - run: |
