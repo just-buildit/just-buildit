@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.6.3] — 2026-10-03
+
 ### Fixed
 
 - **The docs are dark only, with just-bashit's header handling.** One
