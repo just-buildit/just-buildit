@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **The wordmark is theme-neutral and back on the docs home page.** The SVG
+    carried a baked-in dark background, which showed as a black slab on the
+    light theme; it is now transparent with colours that read on both, and
+    the PNG the README and PyPI use is regenerated from it.
+
 ## [0.6.2] — 2026-10-03
 
 ### Fixed

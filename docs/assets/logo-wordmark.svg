@@ -1,8 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 540 120" width="540" height="120">
 
-  <!-- Background -->
-  <rect width="540" height="120" rx="20" fill="#0d1117"/>
-
+  <!-- No background: the page supplies it, so one asset reads on both
+       the light and dark themes. The inner disc stays dark on purpose:
+       it is the badge the "jb" sits in, and holds on either page. -->
   <!-- Gear icon (scaled to 100x100, centered at 60,60) -->
   <g transform="translate(10,10) scale(0.5)">
     <polygon
@@ -36,7 +36,7 @@
     font-family="'Courier New', Courier, monospace"
     font-size="30"
     font-weight="bold"
-    fill="#f59e0b"
+    fill="#e68a05"
     dominant-baseline="middle"
   >just-buildit</text>
 
@@ -45,7 +45,7 @@
     x="150" y="84"
     font-family="'Courier New', Courier, monospace"
     font-size="13"
-    fill="#6b7280"
+    fill="#808998"
     dominant-baseline="middle"
   >PEP 517 build backend for C extensions</text>
 
