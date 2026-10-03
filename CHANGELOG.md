@@ -4,10 +4,13 @@
 
 ### Fixed
 
-- **The wordmark is theme-neutral and back on the docs home page.** The SVG
-    carried a baked-in dark background, which showed as a black slab on the
-    light theme; it is now transparent with colours that read on both, and
-    the PNG the README and PyPI use is regenerated from it.
+- **The docs are dark only, with just-bashit's header handling.** One
+    palette, so there is no theme toggle; the header is the brand colour (it had
+    taken the page's, so it and its logo changed with the theme), the page has
+    its own dark colours, and the wordmark is its own dark panel, back on the
+    home page. The browser-tab icon is a separate gear drawn for 16-32 px with
+    no background square, so it no longer shows the tab bar through the corners
+    of a dark tile.
 
 ## [0.6.2] — 2026-10-03
 
