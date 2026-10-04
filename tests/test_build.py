@@ -324,6 +324,68 @@ class TestPureBuild(unittest.TestCase):
                 _meta.load(Path(tmp))
 
 
+class TestArchiveNames(unittest.TestCase):
+    """Wheel RECORD paths and sdist member names are '/'-separated.
+
+    A native Windows ``str(path)`` is ``demo\\sub\\mod.py``. ``zipfile``
+    normalises that for the archive entry itself, but the RECORD row (written
+    from the same string) and a tar member name are not, so they would name a
+    path that does not exist in the archive. Runs on the Windows leg, where
+    the bug is.
+    """
+
+    def _project(self, root: Path) -> None:
+        (root / "pyproject.toml").write_text(
+            '[build-system]\nrequires = ["just-buildit"]\n'
+            'build-backend = "just_buildit"\n\n'
+            '[project]\nname = "demo"\nversion = "0.1.0"\n\n'
+            "[tool.just-buildit]\npure = true\nrepair = false\n",
+            encoding="utf-8",
+        )
+        sub = root / "src" / "demo" / "sub"
+        sub.mkdir(parents=True)
+        (root / "src" / "demo" / "__init__.py").write_text("")
+        (sub / "__init__.py").write_text("")
+        (sub / "mod.py").write_text("X = 1\n")
+
+    def _in(self, root: Path, fn):
+        orig = os.getcwd()
+        os.chdir(root)
+        try:
+            return fn()
+        finally:
+            os.chdir(orig)
+
+    def test_wheel_names_use_forward_slashes(self):
+        with tempfile.TemporaryDirectory(prefix="jb-test-") as tmp:
+            root = Path(tmp)
+            self._project(root)
+            dist = root / "dist"
+            dist.mkdir()
+            name = self._in(root, lambda: just_buildit.build_wheel(str(dist)))
+            with zipfile.ZipFile(dist / name) as zf:
+                names = zf.namelist()
+                record = zf.read("demo-0.1.0.dist-info/RECORD").decode()
+        self.assertIn("demo/sub/mod.py", names)
+        self.assertEqual([n for n in names if "\\" in n], [])
+        self.assertIn("demo/sub/mod.py,", record)
+        self.assertNotIn("\\", record)
+
+    def test_sdist_names_use_forward_slashes(self):
+        import tarfile
+
+        with tempfile.TemporaryDirectory(prefix="jb-test-") as tmp:
+            root = Path(tmp)
+            self._project(root)
+            dist = root / "dist"
+            dist.mkdir()
+            name = self._in(root, lambda: just_buildit.build_sdist(str(dist)))
+            with tarfile.open(dist / name) as tf:
+                names = tf.getnames()
+        self.assertIn("demo-0.1.0/src/demo/sub/mod.py", names)
+        self.assertEqual([n for n in names if "\\" in n], [])
+
+
 class TestBuildEnv(unittest.TestCase):
     """Verify platform-specific build environment helpers."""
 
@@ -343,25 +405,35 @@ class TestBuildEnv(unittest.TestCase):
             self.assertNotIn("-shared", flags)
             self.assertNotIn("-fPIC", flags)
         elif system == "Windows":
-            self.assertIn("-shared", flags)
-            self.assertNotIn("-fPIC", flags)
-            self.assertNotIn("-dynamiclib", flags)
+            # clang-cl: MSVC's spelling, not gcc's
+            self.assertEqual(flags, ["/LD"])
         else:
             self.assertIn("-shared", flags)
             self.assertIn("-fPIC", flags)
             self.assertNotIn("-dynamiclib", flags)
 
+    def test_ldflags_windows_is_clang_cl_spelling(self):
+        """Simulated, so it runs on every OS: Windows builds with clang-cl,
+        whose flag for a DLL is /LD -- gcc's -shared is not understood."""
+        from unittest import mock
+
+        with mock.patch.object(
+            self._build.platform, "system", return_value="Windows"
+        ):
+            self.assertEqual(self._build._ldflags(), ["/LD"])
+            self.assertEqual(
+                self._build._cc(), os.environ.get("CC", "clang-cl")
+            )
+
     def test_python_link_flags_windows(self):
-        """On Windows, JUST_BUILDIT_LIBS carries -L/-lpython for the linker."""
+        """On Windows, JUST_BUILDIT_LIBS is the python3X.lib path itself."""
         if platform.system() != "Windows":
             self.skipTest("Windows-only")
         flags = self._build._python_link_flags()
-        self.assertTrue(flags)
-        self.assertTrue(any(f.startswith("-L") for f in flags))
-        self.assertTrue(any(f.startswith("-lpython") for f in flags))
-        # JUST_BUILDIT_LDFLAGS must NOT include -l flags (linker order)
-        ldflags = self._build._ldflags()
-        self.assertFalse(any(f.startswith("-l") for f in ldflags))
+        self.assertEqual(len(flags), 1)
+        self.assertTrue(flags[0].endswith(".lib"), flags)
+        self.assertNotIn("\\", flags[0], "forward slashes survive make/sh")
+        self.assertTrue(Path(flags[0]).exists())
 
     def test_python_link_flags_windows_venv_finds_base_libs(self):
         """Inside a venv -- which every PEP 517 isolated build is -- the
@@ -369,10 +441,7 @@ class TestBuildEnv(unittest.TestCase):
         python.exe. Simulated, so it runs on every OS.
 
         Every directory the function searches is pointed into the temp tree,
-        including the stdlib's parent. Left real, it is the MSYS2 UCRT64
-        interpreter's own lib/, which holds libpython3.X.dll.a -- so on that
-        CI leg the MinGW branch won, correctly, and the test measured the
-        runner instead of the fix."""
+        so the test measures the simulated layout and not the runner's."""
         from unittest import mock
 
         with tempfile.TemporaryDirectory() as d:
@@ -396,7 +465,46 @@ class TestBuildEnv(unittest.TestCase):
                 return_value=str(base / "Lib"),
             ):
                 flags = self._build._python_link_flags()
-        self.assertEqual(flags, [f"-L{base / 'libs'}", f"-l{lib}"])
+        self.assertEqual(flags, [(base / "libs" / f"{lib}.lib").as_posix()])
+
+    def test_windows_byproducts_removed_but_not_a_shipped_lib(self):
+        """/LD leaves <ext>.lib and <ext>.exp beside the .pyd (and .obj
+        files); output_dir is packaged verbatim, so they are removed. A .lib
+        the package ships itself is not the extension's, and stays."""
+        from unittest import mock
+
+        suffix = ".cp312-win_amd64.pyd"
+        with tempfile.TemporaryDirectory() as d:
+            out = Path(d)
+            for n in (
+                f"add{suffix}",
+                "add.cp312-win_amd64.lib",
+                "add.cp312-win_amd64.exp",
+                "add.obj",
+                "vendor.lib",
+            ):
+                (out / n).write_bytes(b"")
+            with mock.patch.object(
+                self._build.platform, "system", return_value="Windows"
+            ):
+                self._build._drop_windows_byproducts(out, suffix)
+            self.assertEqual(
+                sorted(p.name for p in out.iterdir()),
+                sorted([f"add{suffix}", "vendor.lib"]),
+            )
+
+    def test_byproducts_untouched_off_windows(self):
+        """A Linux build must not delete a .lib or .obj it did not make."""
+        from unittest import mock
+
+        with tempfile.TemporaryDirectory() as d:
+            out = Path(d)
+            (out / "keep.obj").write_bytes(b"")
+            with mock.patch.object(
+                self._build.platform, "system", return_value="Linux"
+            ):
+                self._build._drop_windows_byproducts(out, ".so")
+            self.assertTrue((out / "keep.obj").exists())
 
     def test_python_link_flags_non_windows(self):
         """On Linux/macOS symbols resolve at runtime — LIBS is empty."""

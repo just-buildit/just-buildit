@@ -17,11 +17,11 @@ ______________________________________________________________________
 
 ## Platform support
 
-| Platform | Tested on                          |
-| -------- | ---------------------------------- |
-| Linux    | x86-64, aarch64                    |
-| macOS    | arm64                              |
-| Windows  | MinGW-w64 / UCRT64 (MSYS2), x86-64 |
+| Platform | Tested on                         |
+| -------- | --------------------------------- |
+| Linux    | x86-64, aarch64                   |
+| macOS    | arm64                             |
+| Windows  | clang-cl + native CPython, x86-64 |
 
 CI runs on all three platforms on every push.
 

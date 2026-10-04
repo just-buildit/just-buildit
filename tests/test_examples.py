@@ -96,11 +96,6 @@ class TestCMakeExample(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        if platform.system() == "Windows":
-            raise unittest.SkipTest(
-                "cmake finds native Windows Python on MSYS2, not the "
-                "MSYS2 Python"
-            )
         missing = [t for t in ("cmake", "make") if not shutil.which(t)]
         if missing:
             raise unittest.SkipTest(
@@ -215,6 +210,11 @@ class TestBazelExample(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
+        if platform.system() == "Windows":
+            raise unittest.SkipTest(
+                "the bazel example's genrule is gcc-flavoured; it needs a "
+                "clang-cl toolchain on Windows (just-buildit/just-buildit#75)"
+            )
         if not shutil.which("bazel"):
             raise unittest.SkipTest("bazel not found")
         cls._tmp = tempfile.mkdtemp(prefix="jb-bazel-")
@@ -390,24 +390,22 @@ class TestJustMakeitExample(unittest.TestCase):
         self.assertTrue(hasattr(obj, "reset"))
 
 
-class TestMinGWExample(unittest.TestCase):
-    """examples/mingw/ — explicit Makefile build on Windows/MinGW UCRT64."""
+class TestClangClExample(unittest.TestCase):
+    """examples/clang-cl/ — explicit Makefile build, clang-cl on Windows."""
 
     @classmethod
     def setUpClass(cls):
         if platform.system() != "Windows":
-            raise unittest.SkipTest("MinGW example only runs on Windows")
-        missing = [t for t in ("make",) if not shutil.which(t)]
+            raise unittest.SkipTest("clang-cl example only runs on Windows")
+        missing = [t for t in ("make", "clang-cl") if not shutil.which(t)]
         if missing:
             raise unittest.SkipTest(
                 f"required tools not found: {', '.join(missing)}"
             )
-        if not shutil.which("cc") and not shutil.which("gcc"):
-            raise unittest.SkipTest("no C compiler found")
-        cls._tmp = tempfile.mkdtemp(prefix="jb-mingw-")
+        cls._tmp = tempfile.mkdtemp(prefix="jb-clang-cl-")
         cls._wheel_dir = Path(cls._tmp) / "dist"
         cls._wheel_dir.mkdir()
-        cls._wheel_name = _build_example(EXAMPLES / "mingw", cls._wheel_dir)
+        cls._wheel_name = _build_example(EXAMPLES / "clang-cl", cls._wheel_dir)
 
     @classmethod
     def tearDownClass(cls):
@@ -423,6 +421,15 @@ class TestMinGWExample(unittest.TestCase):
         with zipfile.ZipFile(self._wheel_dir / self._wheel_name) as zf:
             names = zf.namelist()
         self.assertTrue(any(n.endswith(".pyd") for n in names))
+
+    def test_wheel_has_no_link_byproducts(self):
+        """/LD writes add*.lib and add*.exp beside the .pyd; they are for
+        linking against the extension, which nothing does, and must not
+        ship."""
+        with zipfile.ZipFile(self._wheel_dir / self._wheel_name) as zf:
+            names = zf.namelist()
+        junk = [n for n in names if n.endswith((".lib", ".exp", ".obj"))]
+        self.assertEqual(junk, [])
 
     def test_extension_add(self):
         mod = _unpack_and_import(self._wheel_dir, self._wheel_name, "add")

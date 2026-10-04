@@ -29,22 +29,23 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - run: uv run --no-project -p ${{ matrix.python-version }} python -m unittest tests.test_build tests.test_examples tests.test_cli tests.test_metadata -v
 
-  test-windows-ucrt64:
+  test-windows:
     runs-on: windows-latest
     timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    env:
+      CC: clang-cl
+      CMAKE_GENERATOR: Ninja
     steps:
       - uses: actions/checkout@v6.0.2
-      - uses: msys2/setup-msys2@v2
+      - name: MSVC developer environment (x64)
+        run: scripts/msvc-env.sh x64
+      - uses: astral-sh/setup-uv@v8.1.0
         with:
-          msystem: UCRT64
-          install: >-
-            mingw-w64-ucrt-x86_64-python
-            mingw-w64-ucrt-x86_64-gcc
-            mingw-w64-ucrt-x86_64-cmake
-            make
-          update: true
-      - shell: msys2 {0}
-        run: python -m unittest tests.test_build tests.test_examples -v
+          python-version: "3.12"
+      - run: uv run --no-project -p 3.12 python -m unittest tests.test_build tests.test_examples -v
 
   test-bazel:
     runs-on: ubuntu-latest
@@ -61,7 +62,7 @@ jobs:
       - run: uv run --no-project -p ${{ matrix.python-version }} python -m unittest tests.test_examples.TestBazelExample -v
 
   build:
-    needs: [test, test-bazel, test-windows-ucrt64]
+    needs: [test, test-bazel, test-windows]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:

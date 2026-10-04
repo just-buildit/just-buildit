@@ -16,11 +16,22 @@ project(add C)
 # looks for HEADERS, so it needs the header hint -- which just-buildit already
 # hands every build as JUST_BUILDIT_INCLUDE_DIR. Prefer being told over
 # searching better.
+#
+# file(TO_CMAKE_PATH) because on Windows these arrive as C:\a\_temp\...,
+# and a backslash in a CMake string is an escape: the mangled path names no
+# interpreter, and find_package quietly falls back to a different Python
+# (measured on windows-latest: found 3.14 while building for 3.12).
 if(DEFINED ENV{JUST_BUILDIT_PYTHON})
-    set(Python3_EXECUTABLE "$ENV{JUST_BUILDIT_PYTHON}")
+    file(TO_CMAKE_PATH "$ENV{JUST_BUILDIT_PYTHON}" Python3_EXECUTABLE)
 endif()
 if(DEFINED ENV{JUST_BUILDIT_INCLUDE_DIR})
-    set(Python3_INCLUDE_DIR "$ENV{JUST_BUILDIT_INCLUDE_DIR}")
+    file(TO_CMAKE_PATH "$ENV{JUST_BUILDIT_INCLUDE_DIR}" Python3_INCLUDE_DIR)
+endif()
+# Windows only: JUST_BUILDIT_LIBS is the python3X.lib path (empty elsewhere),
+# and Development.Module wants the import library as well as the headers.
+# Without it the search falls through to whatever Python it finds first.
+if(NOT "$ENV{JUST_BUILDIT_LIBS}" STREQUAL "")
+    file(TO_CMAKE_PATH "$ENV{JUST_BUILDIT_LIBS}" Python3_LIBRARY)
 endif()
 find_package(Python3 COMPONENTS Development.Module REQUIRED)
 Python3_add_library(add MODULE src/add.c)

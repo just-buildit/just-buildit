@@ -2,6 +2,32 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- **A wheel's RECORD and an sdist's member names were backslash-separated on
+    native Windows**, naming paths (`demo\sub\mod.py`) that are not in the
+    archive. They are now always `/`-separated. Build commands also receive
+    `JUST_BUILDIT_OUTPUT_DIR`, `_INCLUDE_DIR` and `_PYTHON` with `/`, because a
+    `C:\Users\...` path loses its backslashes as escapes in an unquoted
+    `sh` command, so `examples/nested` copied its `.py` files to a garbage
+    path. The CMake example now passes `JUST_BUILDIT_LIBS` as `Python3_LIBRARY`
+    and converts the paths with `file(TO_CMAKE_PATH ...)`; without them
+    CMake built for whichever Python it found first.
+
+### Changed
+
+- **Windows builds with clang-cl against native CPython; MinGW / MSYS2 is
+    retired.** `JUST_BUILDIT_LDFLAGS` is `/LD` and `JUST_BUILDIT_LIBS` is the
+    path to `python3X.lib`, an input file for the linker, where both were gcc
+    spellings (`-shared`, `-L<dir> -lpythonX.Y`). The zero-config build calls
+    `$CC`, defaulting to `clang-cl` on Windows, with `/Fe:` and `/Fo`, and
+    just-buildit removes the `.lib` / `.exp` / `.obj` files `/LD` leaves beside
+    the extension, which would otherwise ship in every wheel. A project whose
+    own `command` hard-codes `-shared` or `-lpython` must move to the two
+    variables. `examples/mingw` is now `examples/clang-cl`, and the Windows CI
+    leg runs it under the MSVC environment (`scripts/msvc-env.sh`, vendored from
+    canonical), as just-makeit and doppler do.
+
 ## [0.6.3] — 2026-10-03
 
 ### Fixed

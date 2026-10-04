@@ -114,7 +114,8 @@ def build_sdist(
         for file_path in _collect_files(project_root):
             rel = file_path.relative_to(project_root)
             data = file_path.read_bytes()
-            ti = tarfile.TarInfo(name=f"{top}/{rel}")
+            # as_posix: tar member names are always '/'-separated.
+            ti = tarfile.TarInfo(name=f"{top}/{rel.as_posix()}")
             ti.size = len(data)
             ti.mtime = mtime
             ti.mode = 0o644

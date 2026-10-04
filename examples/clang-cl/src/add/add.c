@@ -1,5 +1,5 @@
 /*
- * add.c — just-buildit MinGW UCRT64 example.
+ * add.c — just-buildit Windows (clang-cl) example.
  *
  * Exports: add.add(a, b) -> int
  */

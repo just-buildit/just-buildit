@@ -114,24 +114,33 @@ jobs:
       - run: uv tool install just-makeit==0.97.0
       - run: uv run --no-project -p ${{ matrix.python-version }} --with pip --with numpy python -m unittest tests.test_examples.TestJustMakeitExample -v
 
-  test-windows-ucrt64:
+  test-windows:
+    # Windows is clang-cl against native CPython (the MSVC ABI), the same
+    # toolchain just-makeit and doppler build with. It replaced an MSYS2
+    # UCRT64 / MinGW job. BINDING: it feeds `CI passed`.
+    name: test-windows (clang-cl)
     needs: changes
     if: needs.changes.outputs.src == 'true' && needs.changes.outputs.code != 'false'
     runs-on: windows-latest
     timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    env:
+      CC: clang-cl
+      # What CMake itself reads, so examples/cmake's plain `cmake -B build`
+      # picks up clang-cl and Ninja.
+      CMAKE_GENERATOR: Ninja
     steps:
       - uses: actions/checkout@v6.0.2
-      - uses: msys2/setup-msys2@v2
+      # clang-cl drives the MSVC toolchain and needs its environment
+      # (INCLUDE / LIB / the linker). Vendored from canonical.
+      - name: MSVC developer environment (x64)
+        run: scripts/msvc-env.sh x64
+      - uses: astral-sh/setup-uv@v8.1.0
         with:
-          msystem: UCRT64
-          install: >-
-            mingw-w64-ucrt-x86_64-python
-            mingw-w64-ucrt-x86_64-gcc
-            mingw-w64-ucrt-x86_64-cmake
-            make
-          update: true
-      - shell: msys2 {0}
-        run: python -m unittest tests.test_build tests.test_examples tests.test_cli -v
+          python-version: "3.12"
+      - run: uv run --no-project -p 3.12 python -m unittest tests.test_build tests.test_examples tests.test_cli -v
 
   # The one check main's ruleset requires -- and it did not exist. The rule
   # named `CI passed`, no job produced it, so `mergeable_state` was `blocked`
@@ -149,7 +158,7 @@ jobs:
     # `changes` too: if it fails, nothing below it ran, and that is not a
     # pass. A job it skipped (an already-tested tree) is `skipped`, which is.
     needs:
-      [changes, lint, test, test-bazel, test-just-makeit, test-windows-ucrt64]
+      [changes, lint, test, test-bazel, test-just-makeit, test-windows]
     if: always()
     steps:
       - run: |

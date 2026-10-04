@@ -15,7 +15,7 @@ Environment variables set for the build command:
   JUST_BUILDIT_EXT_SUFFIX    full extension suffix
                              (e.g. .cpython-312-x86_64-linux-gnu.so)
   JUST_BUILDIT_LDFLAGS       platform link flags (before sources)
-  JUST_BUILDIT_LIBS          Python link flags (after -o, Windows/MinGW only)
+  JUST_BUILDIT_LIBS          Python import library (Windows only; clang-cl)
 """
 
 from __future__ import annotations
@@ -44,74 +44,95 @@ def _auto_repair_command() -> str | None:
 
 
 def _ldflags() -> list[str]:
-    """Return platform-appropriate shared-library link flags."""
+    """Return platform-appropriate shared-library link flags.
+
+    Windows is clang-cl against native CPython (the MSVC ABI), so the flag
+    is MSVC's ``/LD`` (build a DLL), not gcc's ``-shared``.
+    """
     if platform.system() == "Darwin":
         return ["-dynamiclib", "-undefined", "dynamic_lookup"]
     if platform.system() == "Windows":
-        return [
-            "-shared"
-        ]  # MinGW/UCRT64 — -fPIC is meaningless on Windows x64
+        return ["/LD"]
     return ["-shared", "-fPIC"]
 
 
 def _python_link_flags() -> list[str]:
-    """Return Windows/MinGW flags to explicitly link the Python import library.
+    """Return the Python import library a Windows extension must link.
 
     Linux/macOS resolve Python symbols at runtime (dynamic lookup / system
-    linker); Windows requires them at link time.
+    linker); Windows requires them at link time, so the one item returned is
+    the path to ``python3X.lib`` -- a plain input file to clang-cl, which
+    needs no ``-L`` / ``-l`` spelling. Forward slashes, so the path survives
+    a Makefile and a POSIX shell unmangled.
 
-    Two cases:
-      MSYS2/MinGW Python  — ships libpython3.X[.dll].a under <root>/lib/
-      Native Windows CPython — ships python3X.lib under <install root>/libs/
+    The library lives under ``sys.base_prefix``, NOT next to
+    ``sys.executable``: a PEP 517 build runs in an isolated venv, whose
+    python.exe sits in ``<venv>/Scripts/`` -- which is every ``pip wheel`` /
+    ``uv build`` on Windows. The executable's parent stays as a fallback for
+    an interpreter run outside any venv.
     """
     if platform.system() != "Windows":
         return []
     major = sys.version_info.major
     minor = sys.version_info.minor
-
-    # Search candidate dirs: sysconfig LIBDIR, <exe_root>/lib, stdlib parent
     install_root = Path(sys.executable).parent
-    candidates = dict.fromkeys(
-        filter(
-            None,
-            [
-                sysconfig.get_config_var("LIBDIR"),
-                str(install_root / "lib"),
-                str(Path(sysconfig.get_path("stdlib")).parent),
-            ],
-        )
-    )
-
-    # MSYS2 / MinGW-style Python: libpython3.X.a or libpython3.X.dll.a
-    for d in candidates:
-        for stem in (
-            f"libpython{major}.{minor}.a",
-            f"libpython{major}.{minor}.dll.a",
-        ):
-            if (Path(d) / stem).exists():
-                return [f"-L{d}", f"-lpython{major}.{minor}"]
-
-    # Native Windows CPython: python3X.lib in <install root>/libs/. The
-    # install root is sys.base_prefix, NOT sys.executable's directory: a PEP
-    # 517 build runs in an isolated venv, whose python.exe sits in
-    # <venv>/Scripts/, so the executable's parent never holds libs/ -- which
-    # is every `pip wheel` / `uv build` on Windows. The executable's parent
-    # stays as a fallback for an interpreter run outside any venv.
     libs_dirs = list(
         dict.fromkeys([Path(sys.base_prefix) / "libs", install_root / "libs"])
     )
     for libs_dir in libs_dirs:
-        if (libs_dir / f"python{major}{minor}.lib").exists():
-            return [f"-L{libs_dir}", f"-lpython{major}{minor}"]
+        lib = libs_dir / f"python{major}{minor}.lib"
+        if lib.exists():
+            return [lib.as_posix()]
 
-    searched = [*list(candidates), *map(str, libs_dirs)]
     raise RuntimeError(
-        f"Could not find Python {major}.{minor} import library on "
-        f"Windows.\n\n"
-        "Searched:\n" + "\n".join(f"  {d}" for d in searched) + "\n\n"
-        "Install Python from python.org or MSYS2 to get a complete "
-        "distribution."
+        f"Could not find Python {major}.{minor} import library "
+        f"(python{major}{minor}.lib) on Windows.\n\n"
+        "Searched:\n" + "\n".join(f"  {d}" for d in libs_dirs) + "\n\n"
+        "Install CPython from python.org (or `uv python install`) to get a "
+        "complete distribution; just-buildit builds Windows extensions "
+        "with clang-cl against it."
     )
+
+
+def _cc() -> str:
+    """Return the C compiler: $CC, else clang-cl on Windows, cc elsewhere."""
+    return os.environ.get(
+        "CC", "clang-cl" if platform.system() == "Windows" else "cc"
+    )
+
+
+# What the MSVC linker leaves beside a DLL build. None belongs in a wheel:
+# the import library and export file are for LINKING against the extension,
+# which nothing does, and the objects are intermediate.
+_WINDOWS_BYPRODUCTS = ("*.exp", "*.obj")
+
+
+def _drop_windows_byproducts(output_dir: Path, ext_suffix: str) -> None:
+    """Remove the files a clang-cl/MSVC DLL link leaves in ``output_dir``.
+
+    ``/LD`` always writes ``<name>.lib`` and ``<name>.exp`` beside the
+    ``.pyd``, and ``output_dir`` is packaged verbatim, so without this every
+    wheel would carry an import library nothing can use. Only the ``.lib``
+    that shares a ``.pyd``'s stem is removed: a package that ships its own
+    static library keeps it.
+    """
+    if platform.system() != "Windows":
+        return
+    for pyd in output_dir.rglob(f"*{ext_suffix}"):
+        pyd.with_suffix(".lib").unlink(missing_ok=True)
+    for pattern in _WINDOWS_BYPRODUCTS:
+        for f in output_dir.rglob(pattern):
+            f.unlink()
+
+
+def _run_default(cmd: list[str], project_root: Path) -> None:
+    """Run the zero-config compile command, failing loudly."""
+    print(f"just-buildit: default build: {shlex.join(cmd)}", flush=True)
+    result = subprocess.run(cmd, cwd=str(project_root))
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"Default build failed with exit code {result.returncode}"
+        )
 
 
 def _default_build(
@@ -148,22 +169,33 @@ def _default_build(
     if c_files:
         output = output_dir / f"{name}{ext_suffix}"
         py_libs = _python_link_flags()
-        cmd = [
-            os.environ.get("CC", "cc"),
-            *_ldflags(),
-            "-O2",
-            f"-I{include_dir}",
-            *[str(f) for f in c_files],
-            "-o",
-            str(output),
-            *py_libs,
-        ]
-        print(f"just-buildit: default build: {shlex.join(cmd)}", flush=True)
-        result = subprocess.run(cmd, cwd=str(project_root))
-        if result.returncode != 0:
-            raise RuntimeError(
-                f"Default build failed with exit code {result.returncode}"
-            )
+        if platform.system() == "Windows":
+            # clang-cl spells the output /Fe: and would drop an .obj per
+            # source in the project root; /Fo sends them to a scratch dir.
+            with tempfile.TemporaryDirectory() as objdir:
+                cmd = [
+                    _cc(),
+                    *_ldflags(),
+                    "/O2",
+                    f"/I{include_dir}",
+                    *[str(f) for f in c_files],
+                    f"/Fo{Path(objdir).as_posix()}/",
+                    f"/Fe:{output}",
+                    *py_libs,
+                ]
+                _run_default(cmd, project_root)
+        else:
+            cmd = [
+                _cc(),
+                *_ldflags(),
+                "-O2",
+                f"-I{include_dir}",
+                *[str(f) for f in c_files],
+                "-o",
+                str(output),
+                *py_libs,
+            ]
+            _run_default(cmd, project_root)
     elif pure:
         print(
             f"just-buildit: pure-Python package — copying "
@@ -211,12 +243,16 @@ def _make_env(*, name: str, output_dir: Path) -> tuple[dict[str, str], str]:
             "Could not determine extension suffix via sysconfig."
         )
     env = os.environ.copy()
+    # Paths are handed over '/'-separated (as_posix, a no-op off Windows): a
+    # build command usually runs them through make and sh, where an unquoted
+    # C:\\Users\\... loses its backslashes as escapes and the files land in a
+    # garbage relative path. Windows and clang-cl accept '/' everywhere.
     env.update(
         {
             "JUST_BUILDIT_NAME": name,
-            "JUST_BUILDIT_PYTHON": sys.executable,
-            "JUST_BUILDIT_INCLUDE_DIR": include_dir,
-            "JUST_BUILDIT_OUTPUT_DIR": str(output_dir),
+            "JUST_BUILDIT_PYTHON": Path(sys.executable).as_posix(),
+            "JUST_BUILDIT_INCLUDE_DIR": Path(include_dir).as_posix(),
+            "JUST_BUILDIT_OUTPUT_DIR": output_dir.as_posix(),
             "JUST_BUILDIT_EXT_SUFFIX": ext_suffix,
             "JUST_BUILDIT_LDFLAGS": " ".join(_ldflags()),
             "JUST_BUILDIT_LIBS": "",
@@ -289,7 +325,7 @@ def run_build(
     else:
         # Explicit command: populate JUST_BUILDIT_LIBS now that we know C
         # is involved.
-        env["JUST_BUILDIT_LIBS"] = " ".join(_python_link_flags())
+        env["JUST_BUILDIT_LIBS"] = shlex.join(_python_link_flags())
         print(f"just-buildit: running build command: {command}", flush=True)
         _print_env(env, ext_suffix)
 
@@ -303,6 +339,8 @@ def run_build(
                 f"Build command failed with exit code "
                 f"{result.returncode}:\n  {command}"
             )
+
+    _drop_windows_byproducts(output_dir, ext_suffix)
 
     if needs_extension and not list(output_dir.rglob(f"*{ext_suffix}")):
         raise FileNotFoundError(

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shlex
 import sys
 from pathlib import Path
 
@@ -160,7 +161,7 @@ def _inspect() -> None:
     else:
         pure = False  # can't determine without running the build
         ldflags = " ".join(_build._ldflags())
-        libs = " ".join(_build._python_link_flags())
+        libs = shlex.join(_build._python_link_flags())
         print("  build mode:      custom command")
         print(f"  command:         {config.command}")
         print("  env vars:")
@@ -187,8 +188,6 @@ def _inspect() -> None:
     else:
         print(f"  repair:          {config.repair}")
     if config.repair_args:
-        import shlex
-
         print(f"  repair-args:     {shlex.join(config.repair_args)}")
     print()
 
