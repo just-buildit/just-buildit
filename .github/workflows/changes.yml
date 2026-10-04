@@ -45,6 +45,16 @@ on:
         description: "'false' only for a docs-only diff (ci-docs); else 'true' or unset"
         value: ${{ jobs.changes.outputs.code }}
 
+# Every `run:` under pipefail. GitHub's default shell is `bash -e {0}`, which
+# takes a pipeline's status from its LAST command, so a failure left of a
+# `|` -- `$(make -s ci-image-config | sed ...)`, `gh api ... | jq` -- is
+# silently green. `shell: bash` is GitHub's alias for `bash -eo pipefail`.
+# Adopters vendor this file verbatim, and doppler's ci-pipefail gate
+# refused it without this (doppler#1819).
+defaults:
+  run:
+    shell: bash
+
 jobs:
   changes:
     runs-on: ubuntu-latest
