@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-10-03
+
 ### Fixed
 
 - **A wheel's RECORD and an sdist's member names were backslash-separated on
