@@ -193,9 +193,9 @@ jobs:
           # (just-makeit#1537), not a hand-kept list of files: every changed
           # path, except CHANGELOG.md and changelog.d/ (which a release
           # rewrites), must equal its $base copy with the old version
-          # replaced by the new one, read through the Makefile's
-          # VERSION_PROBES. A dependency moving in uv.lock fails the
-          # substitution and runs everything.
+          # replaced by the new one on each line it changed, read through
+          # the Makefile's VERSION_PROBES. A dependency moving in uv.lock
+          # fails the substitution and runs everything.
           c=$(GITHUB_OUTPUT= make -s ci-changes BASE="$base" \
                 | sed -n 's/^src=//p') || c=""
           src=${c:-true}

@@ -10,7 +10,8 @@ the two answers it prints:
     when this is true, even on a diff the matrix may otherwise skip.
 ``code``
     ``false`` only when EVERY changed path matches ``--re`` and no file
-    outside a docs directory (``--dirs``, ``CI_DOCS_DIRS``) was deleted.
+    outside a docs directory (``--dirs``, ``CI_DOCS_DIRS``) was deleted,
+    or is a symlink or submodule on either side of the change.
     The jobs docs cannot break are gated on it, and the repo's aggregator
     grants them a skip only on an explicit ``code=false``.
 
@@ -19,6 +20,10 @@ docs -- ``pyproject.toml`` names ``README.md`` as the package readme -- and
 editing it cannot break that reader, but removing it can. A deletion inside
 a docs directory (a retired page) is still docs-only; its readers are the
 docs build, the doc gates and the live-tree tests, all of which still run.
+A symlink or a submodule is the same risk by another route: what it reaches
+lives somewhere else, so retargeting one can break that reader too, and
+outside a docs directory it counts like a deletion (git's own letter for a
+file turned into one is ``T``, and ``_diff`` reports every such record so).
 
 Fail-safe in every direction, like ``ci-changes``: an unreadable base, an
 empty diff, or a git error answers ``docs=true`` and ``code=true``, so the
@@ -35,6 +40,10 @@ Examples
 >>> classify([("D", "README.md")], rx)
 (True, True)
 >>> classify([("D", "docs/old.md")], rx)
+(True, False)
+>>> classify([("T", "README.md")], rx)
+(True, True)
+>>> classify([("T", "docs/index.md")], rx)
 (True, False)
 >>> classify([], rx)
 (True, True)
@@ -76,32 +85,60 @@ def classify(
     docs = any(is_docs(p) for _, p in changes)
     code = any(
         not is_docs(p)
-        or (status == "D" and not p.startswith(dirs))
+        or (status in ("D", "T") and not p.startswith(dirs))
         for status, p in changes
     )
     return docs, code
 
 
+#: The modes either side of a plain file's change can have: a regular file,
+#: or none (000000, an add or a delete). Anything else -- a symlink
+#: (120000), a submodule (160000) -- reaches contents that live somewhere
+#: else, so ``_diff`` reports it as ``T`` and ``classify`` reads it like a
+#: deletion outside a docs directory.
+FILE_MODES = ("000000", "100644", "100755")
+
+
 def _diff(base: str) -> list[tuple[str, str]] | None:
-    """``git diff --name-status`` of HEAD against ``base``; None on error.
+    """``git diff --raw`` of HEAD against ``base``; None on error.
 
     Renames are split into a delete of the old path and an add of the new,
-    so a page moved out of ``docs/`` counts as both.
+    so a page moved out of ``docs/`` counts as both. Submodules are never
+    ignored: ``ignore = all`` in .gitmodules otherwise hides a moved
+    pointer from the diff altogether (just-buildit.github.io#117). A record
+    with a symlink or submodule on either side is reported as ``T``,
+    whatever git's own letter.
     """
     try:
         out = subprocess.run(
-            ["git", "diff", "--name-status", "--no-renames", base, "HEAD"],
+            [
+                "git",
+                "diff",
+                "--raw",
+                "-z",
+                "--no-renames",
+                "--ignore-submodules=none",
+                base,
+                "HEAD",
+            ],
             check=True,
             capture_output=True,
             text=True,
+            # -z leaves a path unquoted: bytes that are not UTF-8 must
+            # still match (or not) rather than crash the job.
+            errors="surrogateescape",
         ).stdout
     except (OSError, subprocess.CalledProcessError):
         return None
+    # -z: ``:<mode> <mode> <sha> <sha> <status>`` NUL ``<path>`` NUL, so a
+    # path is read whole, whatever it holds.
+    fields = out.split("\0")
     pairs = []
-    for line in out.splitlines():
-        status, _, path = line.partition("\t")
-        if path:
-            pairs.append((status[:1], path))
+    for meta, path in zip(fields[0::2], fields[1::2]):
+        was, now, _, _, status = meta.lstrip(":").split()
+        if was not in FILE_MODES or now not in FILE_MODES:
+            status = "T"
+        pairs.append((status[:1], path))
     return pairs
 
 
