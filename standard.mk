@@ -367,7 +367,7 @@ gates-check: ## Verify `gates` runs every make target CI invokes
 	 while [ -n "$$frontier" ]; do \
 	     next=""; \
 	     for t in $$frontier; do \
-	         for p in $$(sed -n "s/^$$t:[ ]*//p" "$$db" | sed 's/|.*//'); do \
+	         for p in $$($(_STD_DB_PREREQS)); do \
 	             case "$$closure" in *" $$p "*) ;; \
 	                 *) closure="$$closure$$p "; next="$$next $$p";; esac; \
 	         done; \
@@ -432,7 +432,7 @@ gates-home-check: ## Verify every gate in GATES_DEPS runs in some CI job
 	 while [ -n "$$frontier" ]; do \
 	     next=""; \
 	     for t in $$frontier; do \
-	         for p in $$(sed -n "s/^$$t:[ ]*//p" "$$db" | sed 's/|.*//'); do \
+	         for p in $$($(_STD_DB_PREREQS)); do \
 	             case "$$covered" in *" $$p "*) ;; \
 	                 *) covered="$$covered$$p "; next="$$next $$p";; esac; \
 	         done; \
@@ -447,9 +447,9 @@ gates-home-check: ## Verify every gate in GATES_DEPS runs in some CI job
 	     added=0; \
 	     for t in $(GATES_DEPS); do \
 	         case "$$covered" in *" $$t "*) continue;; esac; \
-	         line=$$(sed -n "s/^$$t:[ ]*//p" "$$db" | sed 's/|.*//' | head -n1); \
+	         line=$$($(_STD_DB_PREREQS) | head -n1); \
 	         [ -n "$$line" ] || continue; \
-	         sed -n "/^$$t:/,/^$$/p" "$$db" | grep -q 'recipe to execute' && continue; \
+	         $(_STD_RULE_BLOCK) "$$db" | grep -q 'recipe to execute' && continue; \
 	         all=1; \
 	         for p in $$line; do \
 	             case "$$covered" in *" $$p "*) ;; *) all=0;; esac; \
@@ -853,7 +853,10 @@ export VERSION_PROBES
 # Extra guidance echoed after `release-branch`, repo-specific by nature.
 RELEASE_BRANCH_NOTES ?=
 # What `release-branch` does about the changelog: tell a human, unless
-# HAS_CHANGELOG (below) replaces both with the assembly itself.
+# HAS_CHANGELOG (below) replaces both with the assembly itself -- and asks,
+# before anything is made, whether VERSION is the number the fragments call
+# for (`_std_release_version_check`).
+_std_release_version_check  =
 _std_release_changelog      =
 _std_release_changelog_note = @echo "  - edit CHANGELOG.md ([Unreleased] -> [$(VERSION)])"
 
@@ -959,11 +962,32 @@ version-check: ## [VERSION=x.y.z] Verify version strings agree
 #
 # The rule is a SUBSTITUTION, not a list of files: every changed path, other
 # than prose matching CI_INERT_RE, must equal its BASE copy with the old
-# version string replaced by the new one. So a new version site needs no
-# declaration, and anything else -- a dependency moving in a lockfile, a
-# second edit in a manifest, an added or deleted file -- fails the
-# comparison and runs everything. The versions come from the first of the
-# repo's own VERSION_PROBES, run in HEAD and in an export of BASE.
+# version string replaced by the new one on each line HEAD changed. So a new
+# version site needs no declaration, and anything else -- a dependency
+# moving in a lockfile, a second edit in a manifest, an added or deleted
+# file -- fails the comparison and runs everything. The versions come from
+# the first of the repo's own VERSION_PROBES, run in HEAD and in an export
+# of BASE.
+#
+# Only on the lines HEAD changed, because the old version string is not
+# only the project's: a dependency locked at the same version is a line a
+# release leaves alone, and replacing it everywhere made a pure bump read as
+# more (just-buildit.github.io#114). The expected copy is still built from
+# BASE alone and compared byte for byte, so a changed line passes only as
+# BASE's line with the version replaced. The version is matched as literal
+# text, never as a pattern, so 1.2.3 does not match 1x2x3. A single line
+# holding both the project's version and a dependency's at the same value
+# cannot be split, and runs everything.
+#
+# Each path is read from its `git diff --raw` record -- its old and new
+# mode, and the two blobs compared -- never from a list of names: a name
+# list has no modes, so a bump plus `chmod +x` on a script compared equal
+# and read as a bump alone (just-buildit.github.io#117). Only a regular
+# file whose mode did not change can be a bumped manifest. A mode change,
+# an added or removed file (mode 000000 on one side), a symlink (its blob
+# is a target path, which can read as a bumped line) and a submodule each
+# run everything. Submodules are never ignored, since `ignore = all` in
+# .gitmodules otherwise hides a moved pointer from the diff entirely.
 #
 # Fail-safe in every direction: an unreadable BASE, a probe that prints
 # nothing, no version change, an empty diff -- each answers src=true. The
@@ -992,20 +1016,40 @@ ci-changes: ## [BASE=<rev>] src=false when HEAD is only a version bump over BASE
 	 [ -n "$$old" ] && [ -n "$$new" ] \
 	     || say true "could not read the version at $$base or HEAD"; \
 	 [ "$$old" != "$$new" ] || say true "version unchanged ($$new)"; \
-	 files=$$(git diff --name-only "$$base" HEAD); \
-	 [ -n "$$files" ] || say true "no changes"; \
-	 pat=$$(printf '%s' "$$old" | sed 's/[].[\*^$$/]/\\&/g'); \
-	 n=0; \
-	 for f in $$files; do \
+	 git -c core.quotePath=false diff --raw --no-abbrev --no-renames \
+	     --ignore-submodules=none "$$base" HEAD > "$$tmp/raw" \
+	     || say true "cannot diff $$base against HEAD"; \
+	 [ -s "$$tmp/raw" ] || say true "no changes"; \
+	 tab=$$(printf '\t'); n=0; \
+	 while IFS="$$tab" read -r meta f; do \
 	     if printf '%s\n' "$$f" | grep -Eq '$(CI_INERT_RE)'; then continue; fi; \
-	     git cat-file -e "$$base:$$f" 2>/dev/null && git cat-file -e "HEAD:$$f" 2>/dev/null \
-	         || say true "$$f was added or removed"; \
-	     git show "$$base:$$f" | sed "s/$$pat/$$new/g" > "$$tmp/want"; \
-	     git show "HEAD:$$f" > "$$tmp/got"; \
-	     cmp -s "$$tmp/want" "$$tmp/got" \
+	     set -- $$meta; was=$${1#:}; now=$$2; \
+	     [ "$$was" = "$$now" ] \
+	         || say true "$$f was added, removed or changed mode ($$was -> $$now)"; \
+	     case "$$now" in 100644|100755) ;; \
+	         *) say true "$$f is a symlink or submodule (mode $$now), not a file";; \
+	     esac; \
+	     git cat-file blob "$$3" > "$$tmp/was" \
+	         && git cat-file blob "$$4" > "$$tmp/got" \
+	         || say true "cannot read $$f at $$base or HEAD"; \
+	     OLD="$$old" NEW="$$new" EOL=$$(tail -c1 "$$tmp/was" | wc -l) awk ' \
+	       function bump(s,   o, i) { \
+	         o = ""; \
+	         while ((i = index(s, ENVIRON["OLD"])) > 0) { \
+	           o = o substr(s, 1, i - 1) ENVIRON["NEW"]; \
+	           s = substr(s, i + length(ENVIRON["OLD"])); \
+	         } \
+	         return o s; \
+	       } \
+	       FILENAME == ARGV[1] { got[FNR] = $$0; next } \
+	       { if (FNR > 1) printf "\n"; \
+	         printf "%s", (((got[FNR] "") == ($$0 "")) ? $$0 : bump($$0)); } \
+	       END { if (ENVIRON["EOL"] + 0) printf "\n" }' \
+	       "$$tmp/got" "$$tmp/was" > "$$tmp/want" \
+	     && cmp -s "$$tmp/want" "$$tmp/got" \
 	         || say true "$$f changes more than the version string"; \
 	     n=$$((n + 1)); \
-	 done; \
+	 done < "$$tmp/raw"; \
 	 say false "a version bump alone ($$old -> $$new, $$n manifest(s)); the matrix can skip"
 
 # The other change CI has already tested: a push whose tree is a merged PR's
@@ -1212,12 +1256,17 @@ ci-changes-wiring-check: ## Verify GATES_CI_FILE gates every job on the vendored
 # whatever HEAD the invoker happens to be on (a feature branch, a stale main),
 # silently building the release on the wrong base — the bump then misses
 # everything merged since.
+#
+# The version check comes FIRST, before the branch and the bump: the bump
+# rewrites the manifests before the assembly reads the fragments, so a number
+# refused there would leave a half-made branch (just-buildit.github.io#125).
 release-branch: ## VERSION=x.y.z — branch off origin/main and bump
 ifndef VERSION
 	@echo "usage: make release-branch VERSION=<x.y.z>"
 	@exit 1
 endif
 	git fetch origin main
+	$(_std_release_version_check)
 	git checkout -b chore/release-$(VERSION) origin/main
 	@$(MAKE) bump-version VERSION=$(VERSION)
 	$(_std_release_changelog)
@@ -1340,7 +1389,7 @@ endif
 #                         adopters already publish a `### Docs`.
 ifeq ($(HAS_CHANGELOG),1)
 STD_TARGETS += changelog-check changelog-sections-check changelog-assemble \
-               changelog-assembled-check
+               changelog-assembled-check changelog-version-check
 
 CHANGELOG_FILE       ?= CHANGELOG.md
 CHANGELOG_DIR        ?= changelog.d
@@ -1375,8 +1424,34 @@ changelog-sections-check: ## A branch edits no released CHANGELOG section
 # tracked, so the next `make lint` would hand the formatter paths that no
 # longer exist and fail on a step that succeeded (doppler, cutting v0.44.0).
 changelog-assemble: ## [VERSION=x.y.z] Promote changelog.d/ fragments into CHANGELOG.md
-	@$(_std_changelog) assemble $(if $(VERSION),--version $(VERSION))
+	@$(_std_changelog) assemble $(if $(VERSION),--version $(VERSION) $(_std_changelog_major))
 	@git add -A $(CHANGELOG_DIR) $(CHANGELOG_FILE)
+
+# The number a release may take, read from what it releases: a fragment under
+# added/ makes the next MINOR, anything else the next PATCH, over the highest
+# vX.Y.Z tag; a skipped number is refused. just-makeit proposed the wrong kind
+# three times in ten days, each caught by hand, and its tags are immutable
+# (just-buildit.github.io#125; the rule and its reasons head the `version`
+# section of scripts/changelog.py). `changelog-assemble VERSION=` asks it too,
+# before it writes.
+#
+# It reads origin/main, the tree `release-branch` branches from, and every
+# tag, fetched here: `git fetch origin main` brings no tags, and a tag missing
+# locally would measure the release against an older one.
+#
+# A MAJOR -- 1.0.0 is one -- is never read from fragments. It is a decision,
+# and `MAJOR=1` says so, honoured only on the command line for the reason
+# VERSION is (above): a name in the environment carries no evidence of intent.
+_std_major_typed     = $(filter command line,$(origin MAJOR))
+_std_changelog_major = $(if $(and $(_std_major_typed),$(filter 1,$(MAJOR))),--major)
+
+changelog-version-check: ## VERSION=x.y.z [MAJOR=1] — refuse a number changelog.d/ does not call for
+ifndef VERSION
+	@echo "usage: make changelog-version-check VERSION=<x.y.z>"
+	@exit 1
+endif
+	@git fetch --quiet --tags origin main
+	@$(_std_changelog) version $(VERSION) --rev origin/main $(_std_changelog_major)
 
 # Not in `lint`: a feature branch legitimately carries fragments, so it would
 # be red on every PR. The one moment the question means anything is the
@@ -1391,6 +1466,7 @@ tag-release: changelog-assembled-check
 # `release-branch` promotes the fragments into the new version's section
 # itself. Writing an entry is prose and stays prose; renaming a heading is a
 # hand step, and hand steps are the ones that rot (doppler#996).
+_std_release_version_check = @$(MAKE) --no-print-directory changelog-version-check VERSION=$(VERSION)
 _std_release_changelog = @$(MAKE) --no-print-directory changelog-assemble VERSION=$(VERSION)
 _std_release_changelog_note = @echo "  - review CHANGELOG.md: changelog.d/ was promoted into [$(VERSION)]"
 endif
@@ -1548,6 +1624,25 @@ STD_TARGETS += hook-stage-check tracked-paths-check workflow-timeout-check \
 # is far too big to hold in a shell variable comfortably.
 _STD_TMP = mktemp "$${TMPDIR:-/tmp}/std.XXXXXX"
 
+# The rule for the target named in the calling recipe's `t`, read from the
+# files named after the macro, with the name matched as a LITERAL string:
+#   _STD_RULE_LINES  the text after `<t>:` on each line that starts with it
+#   _STD_RULE_BLOCK  each such line and the lines after it, up to a blank
+#                    one: that rule's entry in make's `-p` database
+#   _STD_DB_PREREQS  the prerequisites of `t` in the database `$$db`, the
+#                    order-only ones (after `|`) dropped
+# Every lookup of a target by name goes through these. A name is not a
+# pattern: pasted into `sed "s/^$$t:..."`, a prerequisite that is a path
+# ended the expression (sed: unknown option to `s'), so it was never walked,
+# and a `.` matched any character, so `v1.2-check` also read the rule of a
+# `v1x2-check` and gates-check passed a CI target `gates` never ran (#122).
+# ENVIRON rather than `awk -v`, which expands backslash escapes in a value.
+_STD_RULE_LINES = T="$$t" awk 'index($$0, ENVIRON["T"] ":") == 1 \
+	{ print substr($$0, length(ENVIRON["T"]) + 2) }'
+_STD_RULE_BLOCK = T="$$t" awk 'index($$0, ENVIRON["T"] ":") == 1 { on = 1 } \
+	on { print; if ($$0 == "") on = 0 }'
+_STD_DB_PREREQS = $(_STD_RULE_LINES) "$$db" | sed 's/^ *//; s/|.*//'
+
 # The `make <target>` invocations in the workflow file $$ci, one per line,
 # unsorted. ONE extractor because `gates-check` and `gates-home-check` are the
 # two directions of a single claim, and two copies of a scan is how the
@@ -1626,7 +1721,8 @@ _STD_CI_TARGETS = { $(_STD_MAKE_RUNS); \
 # the one exception: they are stamped out by `$(eval)`, so their source text
 # reads `lint-$(1):` and no scrape can find them by name — their description
 # comes from the macro that generated them.
-_STD_DESC = d=$$(sed -n "s/^$$t:.*\#\# *//p" $(MAKEFILE_LIST) | head -1); \
+_STD_DESC = d=$$($(_STD_RULE_LINES) $(MAKEFILE_LIST) \
+                | sed -n 's/.*\#\# *//p' | head -1); \
             case "$$t" in \
                 lint-*) [ -n "$$d" ] \
                     || d="Run $${t\#lint-} (pre-commit dispatch target)";; \
@@ -1653,11 +1749,11 @@ _STD_SECTION = case "$$t" in \
         |ship|ci-changes|ci-tree-tested|ci-docs|ci-check-name \
         |ci-changes-wiring-check|pr-watch) tsec="Release";; \
     changelog-check|changelog-sections-check|changelog-assemble \
-        |changelog-assembled-check) tsec="Changelog";; \
+        |changelog-assembled-check|changelog-version-check) tsec="Changelog";; \
     test-examples) tsec="Examples";; \
     ci-image-config|ci-image-check|ci-image-build|ci-image-smoke|ci-shell) \
         tsec="CI-image";; \
-    standard-check|standard-update|standard-files|help-check|ghost-check|hook-dispatch-check|hook-stage-check|tracked-paths-check|workflow-timeout-check|workflow-dispatch-check) \
+    standard-check|standard-update|standard-files|help-check|ghost-check|hook-dispatch-check|hook-stage-check|tracked-paths-check|workflow-timeout-check|workflow-dispatch-check|close-keywords-check) \
         tsec="Gates";; \
     *) tsec="Local";; \
 esac
@@ -1942,7 +2038,7 @@ hook-dispatch-check: ## Verify every pre-commit hook dispatches to a real `make`
 	 n=0; missing=""; \
 	 for t in $$(sed -n "s/^[[:space:]]*entry:[[:space:]]*[\"']\{0,1\}make[[:space:]]\{1,\}\(-s[[:space:]]\{1,\}\)\{0,1\}\([a-zA-Z0-9_.-]\{1,\}\).*/\2/p" "$$cfg"); do \
 	     n=$$((n + 1)); \
-	     grep -q "^$$t:" "$$db" || missing="$$missing $$t"; \
+	     $(_STD_RULE_BLOCK) "$$db" | grep -q . || missing="$$missing $$t"; \
 	 done; \
 	 if [ -n "$$missing" ]; then \
 	     echo "ERROR: pre-commit dispatches to make targets that do not exist:"; \
@@ -2274,6 +2370,37 @@ hook-stage-check: ## Verify every pre-commit hook stage is actually installed
 	     exit 1; \
 	 fi; \
 	 echo "hook-stage-check: $$n non-default stage(s) have an execution home"
+
+# ── close-keywords-check ────────────────────────────────────────────────────
+#
+# A pull request closes only the issues it says it closes
+# (just-buildit.github.io#124). GitHub reads a closing keyword followed by an
+# issue reference as "close it" wherever the pair reaches the default branch
+# -- the PR text, or a commit message, which a COMMIT_MESSAGES squash copies
+# onto main -- and it reads nothing else: "filed, not fixed" before gh-1960
+# closed just-makeit#1960, and scanning history found the same shape closing
+# other issues in just-makeit and doppler. The rule, the evidence and what
+# counts as declaring an issue are in the vendored script's docstring.
+#
+# In `lint`, and on in every repo, because CI runs `make lint` on every pull
+# request and that is all it needs: the PR's title, body, head and base come
+# from the event file Actions gives every step (GITHUB_EVENT_PATH), so no
+# workflow passes anything, and a shallow checkout is deepened by the script
+# rather than by a `fetch-depth` each repo must remember. On any other event
+# it is inert -- a closing keyword acts when it merges, so only the PR run can
+# stop one. Outside CI it prints notes and never fails: without the PR's
+# title and body it cannot know what the PR declares.
+#
+#   CLOSE_KEYWORDS_BASE   outside CI only: what the branch's commits are
+#                         read against for those notes.
+CLOSE_KEYWORDS_BASE ?= origin/main
+STD_TARGETS    += close-keywords-check
+VENDORED_FILES += scripts/close-keywords.py
+
+lint: close-keywords-check
+
+close-keywords-check: ## A PR's commits, title and body close only the issues it declares
+	@python3 scripts/close-keywords.py --base '$(CLOSE_KEYWORDS_BASE)'
 
 # ── Help ─────────────────────────────────────────────────────────────────────
 # Generated from the `## description` on each active target's rule line. Never
