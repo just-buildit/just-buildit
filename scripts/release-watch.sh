@@ -27,7 +27,9 @@ PKG="${RW_PKG:?set RW_PKG=<PyPI distribution name>}"
 TAG="v$VERSION"
 
 # ── Configuration ────────────────────────────────────────────────────────────
-# A pre-publish job in_progress this long is treated as a hung runner.
+# A pre-publish job in_progress this long is treated as a hung runner -- unless
+# release.yml allows it longer: then its own `timeout-minutes`, plus a margin,
+# is the limit (see `hang_limit` below).
 HANG_MIN="${HANG_MIN:-25}"
 
 # The job that publishes to PyPI, as a jq regex. ANCHORED BY DEFAULT, and that
@@ -130,6 +132,101 @@ for i in $(seq 1 12); do
 done
 if [ -z "$RUN" ]; then echo "::error:: no release.yml run found for $TAG"; exit 1; fi
 echo "  run: $RUN  (https://github.com/$REPO/actions/runs/$RUN)"
+
+# ── Each job's hang limit: the time its own workflow allows it ──────────────
+# A job is hung only once it has run longer than it is ALLOWED to. HANG_MIN
+# alone said 25 minutes for every job, while a release's verify job polls
+# main's CI by design for up to an hour (just-makeit's: `timeout-minutes: 75`).
+# It cancelled that healthy job as "hung" on v0.93.0, v0.104.0, v0.105.0,
+# v0.106.0 and v0.106.1, spending the one recovery each time
+# (just-buildit.github.io#70, #140). Two declarations of one number had
+# contradicted each other; now the workflow's is the only one.
+#
+# So the limit for a job is read from release.yml AT THE TAG -- the file the
+# watched run is executing, not whatever this checkout holds:
+#   - no `timeout-minutes` (or an expression): HANG_MIN, as before;
+#   - `timeout-minutes` within HANG_MIN: HANG_MIN, as before;
+#   - `timeout-minutes` above it: that, plus HANG_MARGIN_MIN.
+# Past its own timeout GitHub ends the job and the run fails, and the
+# failed-job rerun path above recovers it. This path stays only as the
+# backstop for a job GitHub did NOT end -- exempting such jobs instead would
+# leave the watch below, which has no deadline of its own, waiting forever.
+HANG_MARGIN_MIN=5
+WF_NAMES=() WF_TIMEOUTS=()
+WF_PATH=".github/workflows/release.yml"
+WF=$(gh api -H "Accept: application/vnd.github.raw" \
+     "repos/$REPO/contents/$WF_PATH?ref=${TAG_SHA:-$TAG}" 2>/dev/null)
+# Each job's run-time name (its `name:`, else its id) and its job-level
+# `timeout-minutes`, read by indentation: a step's own `timeout-minutes` sits
+# deeper and is not the job's.
+while IFS=$'\t' read -r t n; do
+  WF_TIMEOUTS+=("$t") WF_NAMES+=("$n")
+done < <(printf '%s\n' "$WF" | awk '
+  function flush() {
+    if (id != "" && to ~ /^[0-9]+$/)
+      printf "%s\t%s\n", to, (nm != "" ? nm : id)
+    id = ""
+  }
+  function value(s) {
+    sub(/^[^:]*:[ \t]*/, "", s); sub(/[ \t]+#.*$/, "", s)
+    sub(/[ \t]+$/, "", s)
+    if (s ~ /^".*"$/ || s ~ /^\047.*\047$/) s = substr(s, 2, length(s) - 2)
+    return s
+  }
+  /^jobs:[ \t]*(#.*)?$/ { injobs = 1; ji = -1; next }
+  injobs && /^[^ \t#]/  { flush(); injobs = 0 }
+  !injobs || /^[ \t]*(#.*)?$/ { next }
+  {
+    match($0, /^ */); ind = RLENGTH
+    if (ji < 0) ji = ind
+    if (ind == ji) {
+      flush(); id = $0; sub(/^ */, "", id); sub(/:.*/, "", id)
+      nm = ""; to = ""; pi = -1; next
+    }
+    if (pi < 0) pi = ind
+    if (ind != pi) next
+    if ($0 ~ /^ *name:/) nm = value($0)
+    else if ($0 ~ /^ *timeout-minutes:/) to = value($0)
+  }
+  END { flush() }')
+if [ "${#WF_NAMES[@]}" -eq 0 ]; then
+  echo "  note: no job timeouts read from release.yml at $TAG;" \
+       "every job is hung past ${HANG_MIN}m"
+fi
+
+# A workflow name as a bash pattern for the names its jobs run under: glob
+# characters are literal, and each `${{ … }}` expression matches anything.
+job_glob() {
+  local n="$1" out=""
+  n=${n//\\/\\\\}; n=${n//\*/\\*}; n=${n//\?/\\?}; n=${n//\[/\\[}
+  while [[ $n == *'${{'*'}}'* ]]; do
+    out+="${n%%'${{'*}*"; n="${n#*'}}'}"
+  done
+  printf '%s' "$out$n"
+}
+
+hang_limit() {  # <job name as the run shows it> -> minutes before it is hung
+  local name="$1" g i t=""
+  # The whole name first; then a matrix leg ("name (a, b)") or a reusable
+  # workflow's job ("name / job"), so `build` cannot claim `build (x)`'s row.
+  for i in "${!WF_NAMES[@]}"; do
+    g=$(job_glob "${WF_NAMES[$i]}")
+    # shellcheck disable=SC2053  # $g is a pattern on purpose
+    [[ $name == $g ]] && { t=${WF_TIMEOUTS[$i]}; break; }
+  done
+  if [ -z "$t" ]; then
+    for i in "${!WF_NAMES[@]}"; do
+      g=$(job_glob "${WF_NAMES[$i]}")
+      [[ $name == $g" ("* || $name == $g" / "* ]] \
+        && { t=${WF_TIMEOUTS[$i]}; break; }
+    done
+  fi
+  if [ -n "$t" ] && [ "$t" -gt "$HANG_MIN" ]; then
+    echo $((t + HANG_MARGIN_MIN))
+  else
+    echo "$HANG_MIN"
+  fi
+}
 
 # ── The CI-on-the-tagged-commit repair ──────────────────────────────────────
 # release.yml's "Verify CI passed on the tagged commit" job polls for the
@@ -235,17 +332,21 @@ while true; do
     echo "::error:: release run concluded '$CONCL' (no safe auto-recovery left)"; exit 1
   fi
 
-  # Hang: a pre-publish job stuck in_progress past the threshold.
+  # Hang: a pre-publish job stuck in_progress past its own limit.
   if [ "$RETRIED" = 0 ] && ! published; then
-    STUCK=$(echo "$J" | jq -r --argjson lim $((HANG_MIN * 60)) --arg post "$RW_POST_JOBS" '
+    STUCK="" LIM=""
+    while IFS=$'\t' read -r name secs; do
+      [ -z "$name" ] && continue
+      lim=$(hang_limit "$name")
+      if [ "$secs" -gt $((lim * 60)) ]; then STUCK=$name LIM=$lim; break; fi
+    done < <(echo "$J" | jq -r --arg post "$RW_POST_JOBS" '
       now as $n | .jobs[]
       | select(.status=="in_progress")
       | select((.name|test($post;"i"))|not)
       | select(.startedAt!=null)
-      | select(($n - (.startedAt|fromdate)) > $lim)
-      | .name' 2>/dev/null | head -1)
+      | "\(.name)\t\(($n - (.startedAt|fromdate)) | floor)"' 2>/dev/null)
     if [ -n "$STUCK" ]; then
-      echo "  '$STUCK' stuck >${HANG_MIN}m (hung runner) — cancel + rerun once…"
+      echo "  '$STUCK' stuck >${LIM}m (hung runner) — cancel + rerun once…"
       gh run cancel "$RUN" -R "$REPO" >/dev/null 2>&1 || true
       for _ in $(seq 1 20); do
         [ "$(gh run view "$RUN" -R "$REPO" --json status --jq .status 2>/dev/null)" = "completed" ] && break
