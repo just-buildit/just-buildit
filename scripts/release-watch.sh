@@ -199,6 +199,9 @@ fi
 job_glob() {
   local n="$1" out=""
   n=${n//\\/\\\\}; n=${n//\*/\\*}; n=${n//\?/\\?}; n=${n//\[/\\[}
+  # The single-quoted `${{` / `}}` are the LITERAL GitHub expression
+  # delimiters being matched, not a shell expansion (SC2016 says otherwise).
+  # shellcheck disable=SC2016
   while [[ $n == *'${{'*'}}'* ]]; do
     out+="${n%%'${{'*}*"; n="${n#*'}}'}"
   done
