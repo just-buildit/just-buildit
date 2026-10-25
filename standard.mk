@@ -43,7 +43,8 @@
 # all, so its targets do not exist and `help` does not list them):
 #
 #   HAS_C HAS_PYTHON HAS_RUST HAS_DOCS HAS_DOXYGEN HAS_BENCH HAS_COVERAGE
-#   HAS_RELEASE HAS_CHANGELOG HAS_EXAMPLES HAS_CI_IMAGE HAS_PR_WATCH
+#   HAS_RELEASE HAS_CHANGELOG HAS_EXAMPLES HAS_CI_IMAGE HAS_PACKAGER_IMAGE
+#   HAS_PR_WATCH
 #
 # A command variable either has a universally correct default (`TEST_RUST_CMD`
 # is `cargo test`) or is REQUIRED once its flag is on — see "Required
@@ -1504,12 +1505,22 @@ endif
 #   CI_IMAGE_CI_WORKFLOW   the workflow a repin dispatches, since a push or PR
 #                          made with GITHUB_TOKEN starts none
 #   CI_IMAGE_USER          the uid ci-shell runs as (the runner's is 1001)
+#   CI_IMAGE_BASE_REGISTRY where an official base is fetched from, e.g.
+#                          public.ecr.aws/docker/library; empty: Docker Hub,
+#                          as named, with no retry (the old behaviour)
+#   CI_IMAGE_BASE_MIRROR   where it is fetched from when that registry stays
+#                          unreachable (rate limit, quota), e.g.
+#                          mirror.gcr.io/library; empty: no fallback
+#
+# The pin names each base registry-free (`ubuntu:24.04@sha256:...`): a
+# digest is the same image on every registry carrying it, so setting or
+# changing either registry owes no repin.
 #
 # The project's own extras -- a tool no package manager has -- go in an
 # optional docker/ci-extra.sh, whose --fingerprint lines join the fingerprint.
 ifeq ($(HAS_CI_IMAGE),1)
 STD_TARGETS += ci-image-config ci-image-check ci-image-build ci-image-smoke \
-               ci-shell
+               ci-image-base ci-shell
 
 CI_IMAGE_REPO         ?=
 CI_IMAGE_BASES        ?= ubuntu:24.04
@@ -1518,6 +1529,8 @@ CI_IMAGE_SMOKE_TARGET ?=
 CI_IMAGE_LANDING      ?= pr
 CI_IMAGE_CI_WORKFLOW  ?= ci.yml
 CI_IMAGE_USER         ?= 1001
+CI_IMAGE_BASE_REGISTRY ?=
+CI_IMAGE_BASE_MIRROR   ?=
 CI_IMAGE_PIN          := .github/ci-images.env
 VENDORED_FILES        += scripts/ci-image.py docker/ci.Dockerfile \
                          .github/workflows/ci-image.yml
@@ -1525,7 +1538,9 @@ VENDORED_FILES        += scripts/ci-image.py docker/ci.Dockerfile \
 
 $(call _std_require,CI_IMAGE_REPO,HAS_CI_IMAGE)
 
-_std_ci_image = CI_IMAGE_BASES='$(CI_IMAGE_BASES)' python3 scripts/ci-image.py
+_std_ci_image = CI_IMAGE_BASES='$(CI_IMAGE_BASES)' \
+    CI_IMAGE_BASE_REGISTRY='$(CI_IMAGE_BASE_REGISTRY)' \
+    CI_IMAGE_BASE_MIRROR='$(CI_IMAGE_BASE_MIRROR)' python3 scripts/ci-image.py
 
 # Offline: the pin is complete, well formed, and built from this tree's
 # image sources. So it hangs off `lint` -- a PR that edits the Dockerfile,
@@ -1539,7 +1554,14 @@ ci-image-check: ## Fail unless CI_IMAGE_PIN pins an image built from this tree
 ci-image-config: ## Print the CI image settings as KEY=VALUE (plumbing)
 	@printf '%s\n' 'repo=$(CI_IMAGE_REPO)' 'bases=$(CI_IMAGE_BASES)' \
 	    'groups=$(CI_IMAGE_GROUPS)' 'smoke=$(CI_IMAGE_SMOKE_TARGET)' \
-	    'landing=$(CI_IMAGE_LANDING)' 'ci_workflow=$(CI_IMAGE_CI_WORKFLOW)'
+	    'landing=$(CI_IMAGE_LANDING)' 'ci_workflow=$(CI_IMAGE_CI_WORKFLOW)' \
+	    'base_registry=$(CI_IMAGE_BASE_REGISTRY)' \
+	    'base_mirror=$(CI_IMAGE_BASE_MIRROR)' \
+	    $(if $(filter 1,$(HAS_PACKAGER_IMAGE)),'packager=1' \
+	      'packager_repo=$(PACKAGER_IMAGE_REPO)' \
+	      'packager_base_amd64=$(PACKAGER_IMAGE_BASE_AMD64)' \
+	      'packager_base_arm64=$(PACKAGER_IMAGE_BASE_ARM64)' \
+	      'packager_groups=$(PACKAGER_GROUPS)')
 
 # Builds the FIRST base for this machine's arch from the PINNED inputs, so a
 # local image is the pinned one. BASE=<image> picks another listed base.
@@ -1547,13 +1569,22 @@ ci-image-build: ## [BASE=<image>] Build a CI image locally from the pinned input
 	@base='$(or $(BASE),$(firstword $(CI_IMAGE_BASES)))'; \
 	 k=$$($(_std_ci_image) key "$$base"); \
 	 eval "$$($(_std_ci_image) inputs)"; \
-	 ref=$$(eval echo "\$$CI_BASE_$$k"); \
+	 ref=$$($(_std_ci_image) source "$$(eval echo "\$$CI_BASE_$$k")"); \
 	 docker buildx build --load -f docker/ci.Dockerfile \
 	   --build-arg BASE="$$ref" --build-arg APT_SNAPSHOT="$$CI_APT_SNAPSHOT" \
 	   --build-arg JB_VERSION="$$CI_JB_VERSION" \
 	   --build-arg JB_SHA256="$$CI_JB_SHA256" \
 	   --build-arg CI_IMAGE_GROUPS='$(CI_IMAGE_GROUPS)' \
 	   -t "ci-image:$$k" .
+
+# Where the build fetches a pinned base from: the base itself, or under
+# CI_IMAGE_BASE_REGISTRY, or CI_IMAGE_BASE_MIRROR when the registry stays
+# unreachable. A probe of the manifest under retry, pulling nothing: a buildx
+# docker-container build pulls its FROM inside BuildKit, where nothing
+# retries it, so the workflow asks here first and builds from the answer.
+ci-image-base: ## REF=<pinned base> Print where to fetch a pinned base from
+	@test -n '$(REF)' || { echo "usage: make ci-image-base REF=<base@digest>"; exit 1; }
+	@$(_std_ci_image) source '$(REF)'
 
 # Run INSIDE an image (IMAGE=<ref>), as CI_IMAGE_USER, on this checkout.
 ci-image-smoke: ## IMAGE=<ref> Run CI_IMAGE_SMOKE_TARGET inside an image
@@ -1567,6 +1598,76 @@ ci-shell: ## [BASE=<image>] A shell in the pinned CI image, this checkout at /w
 	 ref=$$(grep "^CI_IMAGE_$$k=" $(CI_IMAGE_PIN) | cut -d= -f2); \
 	 test -n "$$ref" || { echo "no pinned image for key $$k"; exit 1; }; \
 	 docker run --rm -it --user $(CI_IMAGE_USER) -v "$$PWD":/w -w /w "$$ref" bash
+endif
+
+# ── Packager image (HAS_PACKAGER_IMAGE) ──────────────────────────────────────
+# A distro package build needs its tools baked into an image, so that CI never
+# reaches a distro mirror for them. This is that image: built from the vendored
+# docker/packager.Dockerfile on a manylinux_2_28 base, so the glibc 2.28 floor
+# its packages claim holds, and pinned by digest in CI_IMAGE_PIN (CI_PACKAGER_*)
+# beside the CI image. The vendored workflow refreshes it with the same weekly
+# run, and a PR pulls the pinned digest, so no package manager runs at CI time.
+#
+# It needs HAS_CI_IMAGE: the two share one pin file and one installer release.
+# Off by default: an adopter that never sets the flag keeps every pin, source
+# hash and workflow output it had.
+#
+#   PACKAGER_IMAGE_REPO        the registry repository for the packager image
+#   PACKAGER_IMAGE_BASE_AMD64  the manylinux_2_28 base for x86_64, by tag
+#   PACKAGER_IMAGE_BASE_ARM64  the manylinux_2_28 base for aarch64, by tag
+#   PACKAGER_GROUPS            bootstrap.toml groups the image installs
+ifeq ($(HAS_PACKAGER_IMAGE),1)
+ifneq ($(HAS_CI_IMAGE),1)
+$(error HAS_PACKAGER_IMAGE is on, but HAS_CI_IMAGE is off -- the packager \
+    shares the CI image's pin and installer)
+endif
+STD_TARGETS += packager-image-check packager-image-build packager-image-smoke
+
+PACKAGER_IMAGE_REPO       ?=
+PACKAGER_IMAGE_BASE_AMD64 ?= quay.io/pypa/manylinux_2_28_x86_64
+PACKAGER_IMAGE_BASE_ARM64 ?= quay.io/pypa/manylinux_2_28_aarch64
+PACKAGER_GROUPS           ?= packager
+VENDORED_FILES            += docker/packager.Dockerfile
+$(call _std_require,PACKAGER_IMAGE_REPO,HAS_PACKAGER_IMAGE)
+
+_std_packager_image = PACKAGER_IMAGE_ENABLED=1 \
+    CI_IMAGE_BASES='$(CI_IMAGE_BASES)' \
+    PACKAGER_GROUPS='$(PACKAGER_GROUPS)' \
+    PACKAGER_BASE_AMD64='$(PACKAGER_IMAGE_BASE_AMD64)' \
+    PACKAGER_BASE_ARM64='$(PACKAGER_IMAGE_BASE_ARM64)' \
+    python3 scripts/ci-image.py
+
+# Offline, like ci-image-check: a PR that edits the packager's Dockerfile or
+# bootstrap.toml cannot merge on the old packager image.
+lint: packager-image-check
+
+packager-image-check: ## Fail unless CI_IMAGE_PIN pins a packager image built from this tree
+	@$(_std_packager_image) check
+
+# The build itself, on the daemon (the classic builder): the workflow calls it,
+# so the workflow file holds no `docker build` of its own. A build in the
+# workflow file is read as a buildx container-driver build wherever that file
+# runs setup-buildx-action, and scripts/check_stock_images.py refuses it as new.
+# IMAGE is the tag to build; BASE the manylinux_2_28 ref the pin names.
+packager-image-build: ## IMAGE=<tag> BASE=<ref> Build the packager image from the pinned inputs
+	@test -n '$(IMAGE)' -a -n '$(BASE)' || { echo "usage: make packager-image-build IMAGE=<tag> BASE=<manylinux ref>"; exit 1; }
+	docker build -f docker/packager.Dockerfile \
+	  --build-arg BASE='$(BASE)' \
+	  --build-arg JB_VERSION='$(CI_JB_VERSION)' \
+	  --build-arg JB_SHA256='$(CI_JB_SHA256)' \
+	  --build-arg PACKAGER_GROUPS='$(PACKAGER_GROUPS)' \
+	  -t '$(IMAGE)' .
+
+# Run INSIDE a packager image (IMAGE=<ref>): the tool the package build calls,
+# and the glibc floor the packages claim.
+packager-image-smoke: ## IMAGE=<ref> Check a packager image: rpmbuild, and the glibc floor
+	@test -n '$(IMAGE)' || { echo "usage: make packager-image-smoke IMAGE=<ref>"; exit 1; }
+	docker run --rm --user $(CI_IMAGE_USER) -v "$$PWD":/w -w /w '$(IMAGE)' \
+	  bash -c 'rpmbuild --version >/dev/null || \
+	      { echo "packager: rpmbuild is missing" >&2; exit 1; }; \
+	    libc=$$(getconf GNU_LIBC_VERSION); \
+	    [ "$$libc" = "glibc 2.28" ] || \
+	      { echo "packager: glibc is $$libc, not the manylinux_2_28 floor" >&2; exit 1; }'
 endif
 
 # ── Gates ────────────────────────────────────────────────────────────────────
@@ -1751,15 +1852,16 @@ _STD_SECTION = case "$$t" in \
     changelog-check|changelog-sections-check|changelog-assemble \
         |changelog-assembled-check|changelog-version-check) tsec="Changelog";; \
     test-examples) tsec="Examples";; \
-    ci-image-config|ci-image-check|ci-image-build|ci-image-smoke|ci-shell) \
+    ci-image-config|ci-image-check|ci-image-build|ci-image-smoke|ci-image-base|ci-shell) \
         tsec="CI-image";; \
+    packager-image-check|packager-image-build|packager-image-smoke) tsec="Packager-image";; \
     standard-check|standard-update|standard-files|help-check|ghost-check|hook-dispatch-check|hook-stage-check|tracked-paths-check|workflow-timeout-check|workflow-dispatch-check|close-keywords-check) \
         tsec="Gates";; \
     *) tsec="Local";; \
 esac
 
 _STD_SECTION_ORDER = Core Lint Aggregates C Python Rust Docs Doxygen Bench \
-                      Coverage Release Changelog Examples CI-image Gates Local
+                      Coverage Release Changelog Examples CI-image Packager-image Gates Local
 
 # Drift. Fetches canonical EVERY time, with no cache: a cache would mean the
 # most likely failure — the fetch failing while the network is fine (CDN
