@@ -236,10 +236,59 @@ STD_TARGETS += all help setup clean test test-fast lint format install-deps
 
 all: $(ALL_DEPS) ## Default goal
 
+# A test run leaves the working tree as it found it. just-bashit's `make
+# test` deleted the package.json both of its bats submodules track, on every
+# run, for nine months (just-bashit#111): a cleanup line globbed
+# bats-*/*.json. Nothing noticed, because no gate looked at the tree after a
+# run. So `test` and `test-fast` compare `git status` before and after.
+#
+#   - BEFORE AND AFTER, not "must be empty", so a tree with edits in it can
+#     still run its tests; only what the RUN changed fails it.
+#   - --ignore-submodules=none looks inside submodules, where that damage was.
+#   - `-c safe.directory='*'`: a CI container runs as root on a checkout the
+#     runner's user owns, and git refuses that repo outright (actions/checkout
+#     trusts it only in a config it removes after its own step). The command
+#     line is a protected scope, so this is honoured, and git hands it to the
+#     submodule processes too. It only lets this read-only `status` run.
+#   - The suite runs in a sub-make so the after-diff runs even when the suite
+#     FAILS: a red run that also dirtied the tree reports both.
+#   - Not a git checkout (an sdist, a tarball): said, and the suite still
+#     runs. There is no tree to compare, which is not the same as a clean one.
+#   - Both snapshots keep git's stderr. A warning git prints every time (an
+#     unreadable ~/.config/git/ignore under a container's foreign HOME) is
+#     then on both sides and cancels; one kept on only the after side failed
+#     a run that changed nothing.
+_STD_TREE_STATUS = git -c safe.directory='*' status --porcelain \
+                   --ignore-submodules=none
+# $(1): the private target holding the suite. $(2): the public one, to name.
+_std_tree_guard = \
+	b=$$($(_STD_TMP)); a=$$($(_STD_TMP)); trap 'rm -f "$$b" "$$a"' EXIT; \
+	if ! $(_STD_TREE_STATUS) >"$$b" 2>&1; then \
+	    echo "$(2): not a git checkout, so the tree check is OFF this run"; \
+	    $(MAKE) --no-print-directory $(1); exit $$?; \
+	fi; \
+	rc=0; $(MAKE) --no-print-directory $(1) || rc=$$?; \
+	$(_STD_TREE_STATUS) >"$$a" 2>&1; \
+	if ! cmp -s "$$b" "$$a"; then \
+	    echo "ERROR: make $(2) changed the working tree:"; \
+	    diff "$$b" "$$a" | sed -n 's/^< /  before: /p; s/^> /  after:  /p'; \
+	    echo "  A test run must leave the tree as it found it. Write"; \
+	    echo "  scratch files to a temp dir or an ignored path, and never"; \
+	    echo "  delete or rewrite a tracked file."; \
+	    rc=1; \
+	fi; \
+	exit $$rc
+
 test: ## Run the default test suite
-	$(TEST_CMD)
+	@$(call _std_tree_guard,.std-test,test)
 
 test-fast: ## Run tests, stopping at the first failure
+	@$(call _std_tree_guard,.std-test-fast,test-fast)
+
+.PHONY: .std-test .std-test-fast
+.std-test:
+	$(TEST_CMD)
+.std-test-fast:
 	$(TEST_FAST_CMD)
 
 # `lint` is the gate — CI runs exactly this and nothing else. The three
