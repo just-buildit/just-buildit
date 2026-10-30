@@ -828,6 +828,51 @@ pr-watch: ## PR=<n> — report whether a PR landed or is genuinely failing (neve
 	@bash scripts/pr-watch.sh '$(PR)'
 endif
 
+# ── train ────────────────────────────────────────────────────────────────────
+# `make train PRS="12 15"` is THE way to land two or more ready PRs. Under a
+# strict ruleset (branches must be up to date) every merge knocks every other
+# open PR back to BEHIND, so landing N one at a time costs N full CI runs in
+# series. A train cherry-picks their commits, unchanged and in order, onto
+# the current base as ONE PR: CI runs once, on the combined tree, which is the
+# only tree the base will ever hold. Land it by REBASE merge, so each commit
+# keeps its own message and `Closes #N`. A merge queue does not buy this: it
+# runs CI once per queued PR.
+#
+# Fails closed at each step: a PR that is not open, is a draft, targets
+# another base or has an unresolved review thread; a head that moved or
+# carries a merge commit; a pick that conflicts; a pick whose patch-id or
+# message differs from its source; TRAIN_GATE failing on the combined tree;
+# and close-keywords-check on the train's own title and body. Without PUSH=1
+# it is a dry run that leaves no branch behind. With PUSH=1 it pushes, opens
+# the train PR and closes each constituent with a link to it. It never
+# merges: `gh pr merge <train> --rebase --match-head-commit <sha>` stays the
+# gate. The script's docstring is the full contract.
+#
+#   PRS           the PR numbers, in the order their commits should land
+#   PUSH=1        publish (otherwise a dry run)
+#   TRAIN_GATE    what must pass on the combined tree (default: make lint)
+#   TRAIN_BASE    the branch the PRs target (default: main)
+#   TRAIN_BRANCH  the train's branch (default: train/<n>-<n>...)
+#   TRAIN_TITLE   the train PR's title (default: train: #<n>, #<n>)
+#
+# Always on, like close-keywords-check: it needs only python3, git and gh,
+# which every repo here already has.
+TRAIN_GATE   ?= make lint
+TRAIN_BASE   ?= main
+TRAIN_BRANCH ?=
+TRAIN_TITLE  ?=
+STD_TARGETS    += train
+VENDORED_FILES += scripts/train.py
+
+train: ## PRS="<n> <n>..." [PUSH=1] — land ready PRs as ONE PR, so CI runs once (never merges)
+	@test -n '$(strip $(PRS))' || { \
+	    echo 'usage: make train PRS="<n> <n> ..." [PUSH=1]'; exit 2; }
+	@python3 scripts/train.py --base '$(TRAIN_BASE)' \
+	    --gate '$(TRAIN_GATE)' \
+	    $(if $(strip $(TRAIN_BRANCH)),--branch '$(TRAIN_BRANCH)') \
+	    $(if $(strip $(TRAIN_TITLE)),--title '$(TRAIN_TITLE)') \
+	    $(if $(filter 1,$(PUSH)),--push) $(PRS)
+
 # ── HAS_RELEASE ──────────────────────────────────────────────────────────────
 # The release workflow, in dependency order: release-branch (bump on a branch)
 # -> PR -> merge -> tag-release -> release-watch, with `ship` doing the last
@@ -1848,7 +1893,7 @@ _STD_SECTION = case "$$t" in \
     coverage|coverage-gate) tsec="Coverage";; \
     bump-version|version-check|release-branch|tag-release|release-watch \
         |ship|ci-changes|ci-tree-tested|ci-docs|ci-check-name \
-        |ci-changes-wiring-check|pr-watch) tsec="Release";; \
+        |ci-changes-wiring-check|pr-watch|train) tsec="Release";; \
     changelog-check|changelog-sections-check|changelog-assemble \
         |changelog-assembled-check|changelog-version-check) tsec="Changelog";; \
     test-examples) tsec="Examples";; \
