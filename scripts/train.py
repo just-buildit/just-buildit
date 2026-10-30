@@ -55,6 +55,7 @@ import pathlib
 import subprocess
 import sys
 import tempfile
+from typing import Any
 
 #: What a train's PR body says, so a reader knows how to land it.
 LAND_HOW = (
@@ -67,7 +68,9 @@ class RefusedError(Exception):
     """A step failed closed; the message says which and why."""
 
 
-def run(*args: str, check: bool = True, **kw) -> subprocess.CompletedProcess:
+def run(
+    *args: str, check: bool = True, **kw: Any
+) -> subprocess.CompletedProcess[str]:
     """Runs a command, capturing text output."""
     p = subprocess.run(args, capture_output=True, text=True, **kw)
     if check and p.returncode != 0:
@@ -79,11 +82,11 @@ def run(*args: str, check: bool = True, **kw) -> subprocess.CompletedProcess:
 
 
 def git(*args: str, check: bool = True) -> str:
-    return run("git", *args, check=check).stdout.strip()
+    return str(run("git", *args, check=check).stdout).strip()
 
 
 def gh(*args: str) -> str:
-    return run(os.environ.get("GH", "gh"), *args).stdout
+    return str(run(os.environ.get("GH", "gh"), *args).stdout)
 
 
 def message(sha: str) -> bytes:
@@ -121,9 +124,9 @@ def same_commit(src: str, dst: str) -> str | None:
     return None
 
 
-def check_pr(n: int, base: str, repo: str) -> dict:
+def check_pr(n: int, base: str, repo: str) -> dict[str, Any]:
     """The PR's metadata, or RefusedError naming what makes it not ready."""
-    pr = json.loads(
+    pr: dict[str, Any] = json.loads(
         gh(
             "pr",
             "view",
@@ -166,7 +169,9 @@ def check_pr(n: int, base: str, repo: str) -> dict:
     return pr
 
 
-def pr_commits(n: int, pr: dict, remote: str, base: str) -> list[str]:
+def pr_commits(
+    n: int, pr: dict[str, Any], remote: str, base: str
+) -> list[str]:
     """The PR's own commits, oldest first, from the head GitHub reports."""
     ref = f"refs/train/pr-{n}"
     git("fetch", "--quiet", "--no-tags", remote, f"+refs/pull/{n}/head:{ref}")
@@ -188,7 +193,7 @@ def pr_commits(n: int, pr: dict, remote: str, base: str) -> list[str]:
 
 
 def body_for(
-    prs: list[dict],
+    prs: list[dict[str, Any]],
     picks: list[tuple[int, str, str]],
     base_sha: str,
     base: str,
@@ -325,7 +330,7 @@ def compose(args: argparse.Namespace) -> int:
         keep = True
         with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False) as f:
             f.write(body)
-        url = (
+        lines = (
             gh(
                 "pr",
                 "create",
@@ -342,7 +347,7 @@ def compose(args: argparse.Namespace) -> int:
             .splitlines()
         )
         os.unlink(f.name)
-        url = url[-1] if url else ""
+        url = lines[-1] if lines else ""
         for p in prs:
             gh(
                 "pr",
