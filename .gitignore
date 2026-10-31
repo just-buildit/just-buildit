@@ -16,6 +16,10 @@ main.py
 # Example build artifacts
 examples/**/_build/
 examples/bazel/bazel-*
+# Bazel 7+ writes these into a WORKSPACE-style project on every build;
+# the tree check (canonical #112) refuses a test run that leaves them.
+examples/bazel/MODULE.bazel
+examples/bazel/MODULE.bazel.lock
 
 # Test fixture build output
 tests/fixture/dist/
