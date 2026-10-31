@@ -7,15 +7,16 @@ other open PR back to BEHIND. Landing N ready PRs one at a time then costs N
 full CI runs in series, plus a re-run for each one a sibling knocked back. A
 *train* cherry-picks the PRs' commits, unchanged and in order, onto the
 current base as one branch, and lands that branch by REBASE merge: each
-commit keeps its own message and its own ``Closes #N``, and CI runs once, on
-the combined tree. That is the only tree that will exist on the base, so it
-is the one worth testing. A merge queue does not buy this: it runs CI once
-per queued PR.
+commit keeps its own message, and CI runs once, on the combined tree. That
+is the only tree that will exist on the base, so it is the one worth
+testing. A merge queue does not buy this: it runs CI once per queued PR.
 
 What this script does, failing closed at every step:
 
 1. Refuses a PR that is not open, is a draft, targets another base, or has
    an unresolved review thread. A train carries only ready work.
+   Reads each PR's linked closing issues from GitHub
+   (``closingIssuesReferences``), and refuses when they cannot be read.
 2. Fetches each PR's head from ``refs/pull/<n>/head`` and refuses it if
    that is not the head GitHub reports (the PR moved under you), or if the
    range carries a merge commit (a train is a linear series of picks).
@@ -28,10 +29,15 @@ What this script does, failing closed at every step:
 5. Runs the gate (``make lint`` unless told otherwise) on the combined tree.
    Two PRs can each be green alone and red together; that is the case the
    train exists to catch before main does.
-6. Runs ``scripts/close-keywords.py`` against a synthetic ``pull_request``
+6. Declares each of those issues on its own ``Closes`` line in the train
+   PR's body, naming the PR it came from. A constituent is closed
+   unmerged, and a PR closed unmerged closes nothing, so an issue linked
+   only by its description (the usual place for ``Closes #N``) would
+   otherwise stay open when the train lands (just-bashit#160).
+7. Runs ``scripts/close-keywords.py`` against a synthetic ``pull_request``
    event built from the train's own title and body, when that script is
    vendored, so the train cannot close an issue none of its PRs declared.
-7. Without ``--push``, stops there: a dry run. It deletes the train branch
+8. Without ``--push``, stops there: a dry run. It deletes the train branch
    and puts you back where you were. With ``--push`` it pushes the branch,
    opens the train PR and closes each constituent with a comment linking
    it. Their branches are kept, for the train's merge to retire.
@@ -59,8 +65,18 @@ from typing import Any
 
 #: What a train's PR body says, so a reader knows how to land it.
 LAND_HOW = (
-    "Land it with a **rebase merge** so each commit keeps its own message "
-    "and closing keywords. Do not squash it."
+    "Land it with a **rebase merge** so each commit keeps its own message. "
+    "Do not squash it. Its PRs are closed unmerged, which closes none of "
+    "the issues they link, so the issues they would have closed are "
+    "declared below."
+)
+
+#: The closing references GitHub resolved for one PR: the keywords in its
+#: description and commits, and any issue linked by hand in its sidebar.
+CLOSING_QUERY = (
+    "query($o:String!,$r:String!,$n:Int!){repository(owner:$o,name:$r)"
+    "{pullRequest(number:$n){closingIssuesReferences(first:100)"
+    "{totalCount nodes{number repository{nameWithOwner}}}}}}"
 )
 
 
@@ -166,7 +182,77 @@ def check_pr(n: int, base: str, repo: str) -> dict[str, Any]:
         raise RefusedError(
             f"#{n} has {open_threads} unresolved review thread(s)"
         )
+    pr["closes"] = closing_issues(n, repo)
     return pr
+
+
+def closing_issues(n: int, repo: str) -> list[str]:
+    """The issues PR ``n`` would close on merge, as references.
+
+    Read from GitHub's own parse (``closingIssuesReferences``), not from a
+    regex over the description, so the train closes exactly what each PR
+    would have. An issue in ``repo`` is ``#N``; one elsewhere keeps its
+    ``owner/repo#N``. Any answer that is not a complete list is refused:
+    a train opened on a partial one would silently leave issues open.
+    """
+    owner, name = repo.split("/", 1)
+    out = gh(
+        "api",
+        "graphql",
+        "-f",
+        f"query={CLOSING_QUERY}",
+        "-f",
+        f"o={owner}",
+        "-f",
+        f"r={name}",
+        "-F",
+        f"n={n}",
+    )
+    try:
+        reply = json.loads(out)
+        refs = reply["data"]["repository"]["pullRequest"][
+            "closingIssuesReferences"
+        ]
+        nodes = refs["nodes"]
+        if reply.get("errors") or refs["totalCount"] != len(nodes):
+            raise ValueError(reply.get("errors") or "a partial list")
+        found = []
+        for i in nodes:
+            where = str(i["repository"]["nameWithOwner"])
+            num = int(i["number"])
+            same = where.lower() == repo.lower()
+            found.append(f"#{num}" if same else f"{where}#{num}")
+    except (ValueError, KeyError, TypeError) as e:
+        raise RefusedError(
+            f"#{n}: cannot read the issues it closes ({e!r}); a train "
+            "opened without them would leave them open"
+        ) from e
+    return found
+
+
+def closes_block(prs: list[dict[str, Any]]) -> str:
+    """One ``Closes`` line per issue the PRs close, each naming its PRs.
+
+    A line is ``- Closes #N, from #P.``: the reference ends at the comma,
+    which is what both GitHub and ``close-keywords-check`` read as a
+    declaration of #N, and ``from #P`` carries no keyword, so it closes
+    nothing. An issue two PRs close is declared once.
+
+    >>> a = {"number": 2, "closes": ["#7", "x/y#3"]}
+    >>> b = {"number": 5, "closes": ["#7"]}
+    >>> closes_block([a, b]).splitlines()
+    ['- Closes #7, from #2 and #5.', '- Closes x/y#3, from #2.']
+    >>> closes_block([{"number": 2, "closes": []}])
+    ''
+    """
+    owners: dict[str, list[str]] = {}
+    for p in prs:
+        for ref in p["closes"]:
+            owners.setdefault(ref, []).append(f"#{p['number']}")
+    return "".join(
+        f"- Closes {ref}, from {' and '.join(src)}.\n"
+        for ref, src in owners.items()
+    )
 
 
 def pr_commits(
@@ -204,10 +290,14 @@ def body_for(
         for n, _, dst in picks
     )
     nums = ", ".join(f"#{p['number']}" for p in prs)
+    closes = closes_block(prs) or "None of its PRs links an issue.\n"
     return (
         f"A merge train: {nums} cherry-picked unchanged onto `{base}` "
         f"{base_sha[:9]}, so they land after one CI run. {LAND_HOW}\n\n"
         f"| commit | from |\n|---|---|\n{rows}\n\n"
+        "**Issues its PRs close**, read from GitHub's "
+        "`closingIssuesReferences` for each:\n\n"
+        f"{closes}\n"
         "**Verified by `make train`:** each commit's `git patch-id "
         "--stable` and full message equal its source PR's commit, and "
         f"`{gate}` passed on the combined tree.\n\n"
