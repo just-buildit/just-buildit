@@ -904,14 +904,22 @@ endif
 #
 #   PRS           the PR numbers, in the order their commits should land
 #   PUSH=1        publish (otherwise a dry run)
-#   TRAIN_GATE    what must pass on the combined tree (default: make lint)
+#   TRAIN_GATE    what must pass on the combined tree (default: make lint,
+#                 after make pyext where the repo has an in-place extension)
 #   TRAIN_BASE    the branch the PRs target (default: main)
 #   TRAIN_BRANCH  the train's branch (default: train/<n>-<n>...)
 #   TRAIN_TITLE   the train PR's title (default: train: #<n>, #<n>)
 #
 # Always on, like close-keywords-check: it needs only python3, git and gh,
 # which every repo here already has.
-TRAIN_GATE   ?= make lint
+#
+# Where `pyext` exists, the gate rebuilds the extension first. The train runs
+# in the checkout it switched, whose extension was built from whatever that
+# checkout last held, and a lint that imports it (docstring coverage, runtime
+# docs) then judges the old code: a PR that changes a header docstring is
+# refused on a tree CI passes (doppler#2749). Derived from STD_TARGETS, so it
+# follows the same HAS_C + HAS_PYTHON overlap that defines pyext.
+TRAIN_GATE   ?= $(if $(filter pyext,$(STD_TARGETS)),make pyext && )make lint
 TRAIN_BASE   ?= main
 TRAIN_BRANCH ?=
 TRAIN_TITLE  ?=
