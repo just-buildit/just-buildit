@@ -20,6 +20,12 @@ What this script does, failing closed at every step:
 2. Fetches each PR's head from ``refs/pull/<n>/head`` and refuses it if
    that is not the head GitHub reports (the PR moved under you), or if the
    range carries a merge commit (a train is a linear series of picks).
+   Refuses a commit whose author or committer email is a placeholder:
+   its domain (after the ``@``) has no dot, as in ``t <t@t>``. A pick
+   copies identity faithfully, so the train would land it on the base
+   (doppler fdde12e7c). Bot identities such as
+   ``41898282+github-actions[bot]@users.noreply.github.com`` and
+   ``noreply@just-buildit.invalid`` have a dotted domain and pass.
 3. Cherry-picks every commit onto a new branch off ``<remote>/<base>``. A
    conflict aborts: two PRs that touch the same lines need a human, and
    resolving them here would land a diff nobody reviewed.
@@ -74,7 +80,11 @@ A re-cut:
    ``state,headRefOid`` back and requires OPEN at the head the train
    composed. It then publishes as above, reusing ``T``'s branch name with
    a lease pinned to ``T``'s head. Without ``--push`` it changes nothing
-   on GitHub.
+   on GitHub. If the restoring push fails, it stops with the command that
+   restores the branch, and the same re-cut as a dry run: once its
+   ``#n moved:`` line ends at the reviewed head, adding ``--push``
+   recovers (the constituents it reopened read as open, the rest are
+   reopened). MOVED names a PR, not a sha, so that check is the reader's.
 
 Environment: ``GH`` names the gh binary (default ``gh``), which is how the
 tests substitute a fake.
@@ -180,6 +190,27 @@ def same_commit(src: str, dst: str) -> str | None:
         return "its diff differs"
     if message(src) != message(dst):
         return "its message differs"
+    return None
+
+
+def placeholder_identity(sha: str) -> str | None:
+    """Why commit ``sha`` carries a placeholder identity, or None.
+
+    A placeholder is an email with no ``@`` at all (``t.t``), or whose
+    domain (the part after the last ``@``) contains no dot -- ``t@t``,
+    ``me@localhost``. A single-label domain is refused by design: no real
+    mailbox and no bot noreply address uses one, so this needs no list of
+    known owners. It is a shape check, not validation: ``t@t.`` passes.
+    The author is checked first, then the committer.
+    """
+    fmt = "--format=%an%x00%ae%x00%cn%x00%ce"
+    fields = git("show", "-s", fmt, sha).split("\0")
+    for role, name, email in (
+        ("authored", fields[0], fields[1]),
+        ("committed", fields[2], fields[3]),
+    ):
+        if "@" not in email or "." not in email.rpartition("@")[2]:
+            return f"is {role} by `{name} <{email}>`"
     return None
 
 
@@ -325,6 +356,17 @@ def pr_commits(
     commits = git("rev-list", "--reverse", rng).split()
     if not commits:
         raise RefusedError(f"#{n} has no commits ahead of {remote}/{base}")
+    for sha in commits:
+        who = placeholder_identity(sha)
+        if who:
+            raise RefusedError(
+                f"#{n}'s commit {sha[:9]} {who}, a placeholder identity "
+                "(no dot in its email domain); fix the authorship on the "
+                "PR before it rides, e.g. `git commit --amend "
+                "--reset-author` or `git rebase --exec 'git commit "
+                f"--amend --no-edit --reset-author' {remote}/{base}`, "
+                "and push"
+            )
     return commits
 
 
@@ -500,13 +542,40 @@ def push_lease(
     )
 
 
-def reopen(pr: dict[str, Any], remote: str) -> None:
+def again(args: argparse.Namespace) -> str:
+    """The ``make train`` arguments that repeat this run, without PUSH.
+
+    >>> import argparse
+    >>> again(argparse.Namespace(recut=9, moved={3, 1}, prs=[1, 3]))
+    "RECUT=9 MOVED='1,3'"
+    >>> again(argparse.Namespace(recut=0, moved=set(), prs=[4, 2]))
+    "PRS='4 2'"
+    """
+    if args.recut:
+        return f"RECUT={args.recut}" + (
+            f" MOVED='{','.join(map(str, sorted(args.moved)))}'"
+            if args.moved
+            else ""
+        )
+    return f"PRS='{' '.join(map(str, args.prs))}'"
+
+
+def reopen(pr: dict[str, Any], remote: str, rerun: str) -> None:
     """Reopens a closed constituent at the head the train composed.
 
     GitHub refuses to reopen a PR whose branch was force-pushed while it
     was closed. Only then, and only for a head that moved, is the branch
     pushed back to the closed head, the PR reopened, and the new head
     restored; each push's lease pins the exact sha it replaces.
+
+    If that restoring push fails, the refusal prints the exact command
+    that restores the branch, then ``rerun``: this run's ``make train``
+    command WITHOUT ``PUSH=1``. Its dry run prints ``#n moved: old ->
+    new``, and only once that ``new`` is the reviewed head is the push
+    safe: MOVED names a PR, not a sha, so a re-cut pushed blind would take
+    whatever the branch holds. When the lease was rejected (``stale
+    info``), someone pushed after the reopen, and the refusal says the
+    branch may hold a head nobody reviewed.
     """
     n, br = pr["number"], pr["headRefName"]
     old, new = pr["closed_head"], pr["headRefOid"]
@@ -529,13 +598,26 @@ def reopen(pr: dict[str, Any], remote: str) -> None:
             # back either way. If it cannot, say exactly how to put it back.
             back = push_lease(remote, br, old, new, check=False)
             if back.returncode != 0:
+                why = (back.stderr or back.stdout).strip()
+                # A rejected lease means the branch is not at the closed
+                # head: someone pushed after the reopen.
+                raced = (
+                    f"Someone pushed to {br} after the reopen, so it may "
+                    "hold a head nobody reviewed; the restore below "
+                    "refuses until you decide which head is right.\n"
+                    if "stale info" in why
+                    else ""
+                )
                 raise RefusedError(
                     f"#{n}: branch {br} may be left at {old[:9]}, not the "
                     f"reviewed head {new[:9]} (kept locally at "
-                    f"refs/train/closed-{n}-new): "
-                    f"{(back.stderr or back.stdout).strip()}; restore with: "
-                    f"git push --force-with-lease=refs/heads/{br}:{old} "
-                    f"{remote} {new}:refs/heads/{br}"
+                    f"refs/train/closed-{n}-new): {why}\n{raced}"
+                    f"Restore with: git push --force-with-lease="
+                    f"refs/heads/{br}:{old} {remote} {new}:refs/heads/{br}"
+                    f"\nThen dry-run the same re-cut, with any TRAIN_* "
+                    f"overrides you gave: {rerun}\n"
+                    f"Add PUSH=1 only once its `#{n} moved:` line ends at "
+                    f"the reviewed head {new[:9]}."
                 )
     for i in range(VERIFY_TRIES):
         got = json.loads(
@@ -726,16 +808,9 @@ def compose_train(args: argparse.Namespace) -> int:
                     f"train: a re-cut would close #{args.recut} and reopen "
                     + (", ".join(f"#{p['number']}" for p in closed) or "none")
                 )
-                again = f"RECUT={args.recut}" + (
-                    f" MOVED='{','.join(map(str, sorted(args.moved)))}'"
-                    if args.moved
-                    else ""
-                )
-            else:
-                again = f"PRS='{' '.join(map(str, args.prs))}'"
             print(
                 "train: dry run OK. To publish: re-run with --push "
-                f"(make train {again} PUSH=1)"
+                f"(make train {again(args)} PUSH=1)"
             )
             return 0
 
@@ -751,7 +826,7 @@ def compose_train(args: argparse.Namespace) -> int:
                 )
             for p in prs:
                 if p["state"] == "CLOSED":
-                    reopen(p, args.remote)
+                    reopen(p, args.remote, f"make train {again(args)}")
         if on_remote:
             git(
                 "push",

@@ -908,13 +908,15 @@ endif
 #
 # Fails closed at each step: a PR that is not open, is a draft, targets
 # another base or has an unresolved review thread; a head that moved or
-# carries a merge commit; a pick that conflicts; a pick whose patch-id or
-# message differs from its source; TRAIN_GATE failing on the combined tree;
-# and close-keywords-check on the train's own title and body. Without PUSH=1
-# it is a dry run that leaves no branch behind. With PUSH=1 it pushes, opens
-# the train PR and closes each constituent with a link to it. It never
-# merges: `gh pr merge <train> --rebase --match-head-commit <sha>` stays the
-# gate. The script's docstring is the full contract.
+# carries a merge commit; a commit authored or committed by a placeholder
+# identity (an email domain with no dot, as in `t <t@t>`); a pick that
+# conflicts; a pick whose patch-id or message differs from its source;
+# TRAIN_GATE failing on the combined tree; and close-keywords-check on the
+# train's own title and body. Without PUSH=1 it is a dry run that leaves no
+# branch behind. With PUSH=1 it pushes, opens the train PR and closes each
+# constituent with a link to it. It never merges: `gh pr merge <train>
+# --rebase --match-head-commit <sha>` stays the gate. The script's docstring
+# is the full contract.
 #
 # `make train RECUT=<train#>` re-cuts a train that went red: it reads the
 # constituents and their heads from that train's table, refuses any head
@@ -922,7 +924,10 @@ endif
 # composes as above. With PUSH=1, once the gate passes, it closes the old
 # train and reopens each constituent, restoring a force-pushed branch
 # around the reopen with leases that pin exact shas; GitHub refuses to
-# reopen a PR whose branch was force-pushed while it was closed.
+# reopen a PR whose branch was force-pushed while it was closed. If the
+# restore fails it prints the command that puts the branch back and the
+# same re-cut as a dry run; add PUSH=1 once its `#n moved:` line ends at
+# the reviewed head.
 #
 #   PRS           the PR numbers, in the order their commits should land
 #   RECUT         instead of PRS: the train PR to re-cut
