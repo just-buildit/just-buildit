@@ -902,7 +902,17 @@ endif
 # merges: `gh pr merge <train> --rebase --match-head-commit <sha>` stays the
 # gate. The script's docstring is the full contract.
 #
+# `make train RECUT=<train#>` re-cuts a train that went red: it reads the
+# constituents and their heads from that train's table, refuses any head
+# that moved unless MOVED names the PR (its new head was reviewed), and
+# composes as above. With PUSH=1, once the gate passes, it closes the old
+# train and reopens each constituent, restoring a force-pushed branch
+# around the reopen with leases that pin exact shas; GitHub refuses to
+# reopen a PR whose branch was force-pushed while it was closed.
+#
 #   PRS           the PR numbers, in the order their commits should land
+#   RECUT         instead of PRS: the train PR to re-cut
+#   MOVED         with RECUT: constituents whose moved head was reviewed
 #   PUSH=1        publish (otherwise a dry run)
 #   TRAIN_GATE    what must pass on the combined tree (default: make lint,
 #                 after make pyext where the repo has an in-place extension)
@@ -926,13 +936,17 @@ TRAIN_TITLE  ?=
 STD_TARGETS    += train
 VENDORED_FILES += scripts/train.py
 
-train: ## PRS="<n> <n>..." [PUSH=1] — land ready PRs as ONE PR, so CI runs once (never merges)
-	@test -n '$(strip $(PRS))' || { \
-	    echo 'usage: make train PRS="<n> <n> ..." [PUSH=1]'; exit 2; }
+train: ## PRS="<n> <n>..."|RECUT=<n> [PUSH=1] — land ready PRs as ONE PR, so CI runs once (never merges)
+	@test -n '$(strip $(PRS)$(RECUT))' || { \
+	    echo 'usage: make train PRS="<n> <n> ..." [PUSH=1]'; \
+	    echo '       make train RECUT=<train> [MOVED="<n> ..."] [PUSH=1]'; \
+	    exit 2; }
 	@python3 scripts/train.py --base '$(TRAIN_BASE)' \
 	    --gate '$(TRAIN_GATE)' \
 	    $(if $(strip $(TRAIN_BRANCH)),--branch '$(TRAIN_BRANCH)') \
 	    $(if $(strip $(TRAIN_TITLE)),--title '$(TRAIN_TITLE)') \
+	    $(if $(strip $(RECUT)),--recut '$(strip $(RECUT))') \
+	    $(if $(strip $(MOVED)),--moved '$(strip $(MOVED))') \
 	    $(if $(filter 1,$(PUSH)),--push) $(PRS)
 
 # ── HAS_RELEASE ──────────────────────────────────────────────────────────────
