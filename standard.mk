@@ -914,7 +914,10 @@ endif
 # TRAIN_GATE failing on the combined tree; and close-keywords-check on the
 # train's own title and body. Without PUSH=1 it is a dry run that leaves no
 # branch behind. With PUSH=1 it pushes, opens the train PR and closes each
-# constituent with a link to it. It never merges: `gh pr merge <train>
+# constituent with a link to it, retrying a close GitHub fails. If one still
+# fails it prints PUBLISHED (not REFUSED), what is open and the `gh pr close`
+# that finishes it, and the script exits 3 (make shows `Error 3`; `make`
+# itself exits 2); do not re-run it. It never merges: `gh pr merge <train>
 # --rebase --match-head-commit <sha>` stays the gate. The script's docstring
 # is the full contract.
 #
