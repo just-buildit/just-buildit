@@ -914,23 +914,26 @@ endif
 # TRAIN_GATE failing on the combined tree; and close-keywords-check on the
 # train's own title and body. Without PUSH=1 it is a dry run that leaves no
 # branch behind. With PUSH=1 it pushes, opens the train PR and closes each
-# constituent with a link to it, retrying a close GitHub fails. If one still
-# fails it prints PUBLISHED (not REFUSED), what is open and the `gh pr close`
-# that finishes it, and the script exits 3 (make shows `Error 3`; `make`
-# itself exits 2); do not re-run it. It never merges: `gh pr merge <train>
-# --rebase --match-head-commit <sha>` stays the gate. The script's docstring
-# is the full contract.
+# constituent with a link to it, retrying a close GitHub fails. It cancels
+# each closed one's queued and in-progress CI runs, which gate nothing now
+# and hold runners (never the train's own; a failed cancel only warns,
+# just-buildit.github.io#200). If a close still fails it prints PUBLISHED
+# (not REFUSED), what is open and the `gh pr close` that finishes it, and
+# the script exits 3 (make shows `Error 3`; `make` itself exits 2); do not
+# re-run it. It never merges: `gh pr merge <train> --rebase
+# --match-head-commit <sha>` stays the gate. The script's docstring is the
+# full contract.
 #
 # `make train RECUT=<train#>` re-cuts a train that went red: it reads the
 # constituents and their heads from that train's table, refuses any head
 # that moved unless MOVED names the PR (its new head was reviewed), and
 # composes as above. With PUSH=1, once the gate passes, it closes the old
-# train and reopens each constituent, restoring a force-pushed branch
-# around the reopen with leases that pin exact shas; GitHub refuses to
-# reopen a PR whose branch was force-pushed while it was closed. If the
-# restore fails it prints the command that puts the branch back and the
-# same re-cut as a dry run; add PUSH=1 once its `#n moved:` line ends at
-# the reviewed head.
+# train, cancelling its active runs, and reopens each constituent,
+# restoring a force-pushed branch around the reopen with leases that pin
+# exact shas; GitHub refuses to reopen a PR whose branch was force-pushed
+# while it was closed. If the restore fails it prints the command that
+# puts the branch back and the same re-cut as a dry run; add PUSH=1 once
+# its `#n moved:` line ends at the reviewed head.
 #
 #   PRS           the PR numbers, in the order their commits should land
 #   RECUT         instead of PRS: the train PR to re-cut

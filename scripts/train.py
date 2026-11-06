@@ -47,12 +47,21 @@ What this script does, failing closed at every step:
    and puts you back where you were. With ``--push`` it pushes the branch,
    opens the train PR and closes each constituent with a comment linking
    it. Their branches are kept, for the train's merge to retire.
+9. Cancels each closed constituent's in-progress and queued workflow
+   runs of the head the train took (``cancel_runs``). Closing a PR does
+   not cancel its CI, and that CI can gate nothing once the train's run
+   on the combined tree replaces it; left running, it holds runners the
+   train and every release are queued for (just-buildit.github.io#200).
+   A run of the train's own head is never cancelled, nor any on its
+   branch for a constituent.
 
 Once the train PR exists nothing is REFUSED, because something was
 published. Each constituent gets its comment (``gh pr comment``), then is
 closed (``gh pr close``): two calls, so a retry never repeats a comment
-that landed. Each is tried ``RETRY_TRIES`` times, waiting
-``TRAIN_RETRY_DELAY`` seconds (default 2), doubling, between tries: a
+that landed. A run that cannot be listed or cancelled (step 9) is a
+``train: warning`` naming it, never a failure. Each is tried
+``RETRY_TRIES`` times, waiting ``TRAIN_RETRY_DELAY`` seconds (default 2),
+doubling, between tries: a
 GitHub API failure there is usually transient. A constituent merged in
 the meantime counts as done. If one still fails, the run
 prints ``train: PUBLISHED`` with the train's URL, the constituents closed
@@ -96,8 +105,10 @@ A re-cut:
    head (``--force-with-lease`` pinned to the new head), reopens it, and
    restores the new head (lease pinned to the closed head). Then reads
    ``state,headRefOid`` back and requires OPEN at the head the train
-   composed. It then publishes as above, reusing ``T``'s branch name with
-   a lease pinned to ``T``'s head. Without ``--push`` it changes nothing
+   composed. Closing ``T`` cancels the active runs of ``T``'s head, as
+   step 9 does a constituent's, before the new head is pushed. It then
+   publishes as above, reusing ``T``'s branch name with a lease pinned to
+   ``T``'s head. Without ``--push`` it changes nothing
    on GitHub. If the restoring push fails, it stops with the command that
    restores the branch, and the same re-cut as a dry run: once its
    ``#n moved:`` line ends at the reviewed head, adding ``--push``
@@ -689,6 +700,71 @@ def gh_retried(*args: str, stop: str = "") -> str | None:
     return why
 
 
+#: The workflow-run states ``cancel_runs`` cancels: those holding or
+#: waiting for a runner. ``gh run list --status`` takes one at a time.
+ACTIVE_RUNS = ("in_progress", "queued")
+
+
+def cancel_runs(
+    who: str, branch: str, sha: str, head: str, avoid: str = ""
+) -> None:
+    """Cancels the in-progress and queued workflow runs of ``sha`` on
+    ``branch``.
+
+    ``who`` (``#12``) is the PR just closed, whose head is ``sha`` on
+    ``branch``. Closing a PR does not cancel its CI, and once the train's
+    run on the combined tree replaces it, that CI gates nothing while it
+    holds runners the train and any release wait for
+    (just-buildit.github.io#200).
+
+    Only a run whose ``headSha`` is ``sha`` is cancelled: a fork's PR
+    branch may share its name with a branch of the base repo (``main``),
+    whose runs are not this PR's. Nothing is cancelled when ``sha`` is
+    the train's own ``head``, nor when ``branch`` is ``avoid`` (a
+    constituent passes the train's branch). The old train a re-cut
+    closes shares the new train's branch, so it passes no ``avoid``: it
+    is told apart by sha, and closed before the new head is pushed.
+
+    Called only once the train is published or about to be, so nothing
+    here fails the run: a list or a cancel that fails is a
+    ``train: warning`` naming the run, which is left as it was.
+    """
+    if not branch or sha == head or branch == avoid:
+        return
+    runs: list[dict[str, Any]] = []
+    for status in ACTIVE_RUNS:
+        try:
+            runs += json.loads(
+                gh(
+                    "run",
+                    "list",
+                    "--branch",
+                    branch,
+                    "--status",
+                    status,
+                    "--limit",
+                    "100",
+                    "--json",
+                    "databaseId,headSha,name,url",
+                )
+            )
+        except (RefusedError, ValueError) as e:
+            print(
+                f"train: warning: cannot list {who}'s {status} runs on "
+                f"{branch}, so none is cancelled: {e}"
+            )
+    for r in runs:
+        if r.get("headSha") != sha:
+            continue
+        rid = str(r["databaseId"])
+        name = f"run {rid} ({r.get('name', '?')}, {r.get('url', '?')})"
+        why = gh_retried("run", "cancel", rid)
+        if why is None:
+            print(f"train: cancelled {who}'s {name}")
+        else:
+            print(f"train: warning: cannot cancel {who}'s {name}: {why}")
+
+
 def superseded(url: str) -> str:
     """The comment each constituent gets, linking the train ``url``."""
     return (
@@ -717,12 +793,18 @@ def finish(n: int, url: str, commented: bool) -> str:
 
 
 def after_publish(
-    url: str, head: str, args: argparse.Namespace, ns: list[int]
+    url: str,
+    head: str,
+    args: argparse.Namespace,
+    prs: list[dict[str, Any]],
+    branch: str,
 ) -> int:
-    """Closes each constituent in ``ns`` once the train PR ``url`` is open.
+    """Closes each constituent in ``prs`` once the train PR ``url`` is
+    open, on ``branch`` at ``head``.
 
     Each gets the ``superseded`` comment, then is closed, each step through
-    ``gh_retried``. They are two calls because ``gh pr close --comment``
+    ``gh_retried``; once closed, its active runs are cancelled
+    (``cancel_runs``). They are two calls because ``gh pr close --comment``
     posts the comment before it closes, so retrying it would repeat a
     comment that landed. A constituent whose comment never lands is not
     closed, so the one ``finish`` command does both. A constituent merged
@@ -740,7 +822,8 @@ def after_publish(
     done: list[int] = []
     merged: list[int] = []
     left: list[tuple[int, bool, str]] = []
-    for n in ns:
+    for p in prs:
+        n = p["number"]
         why = gh_retried("pr", "comment", str(n), "--body", superseded(url))
         if why is not None:
             left.append((n, False, why))
@@ -748,6 +831,13 @@ def after_publish(
         why = gh_retried("pr", "close", str(n), stop=MERGED)
         if why is None:
             done.append(n)
+            cancel_runs(
+                f"#{n}",
+                p.get("headRefName") or "",
+                p["headRefOid"],
+                head,
+                avoid=branch,
+            )
         elif MERGED in why:
             merged.append(n)
         else:
@@ -1020,6 +1110,14 @@ def compose_train(args: argparse.Namespace) -> int:
                     "Re-cut by `make train RECUT=` onto the current base; "
                     "the new train links back here.",
                 )
+                # Before the push: the old train's runs are on the branch
+                # the new one may reuse, told apart only by their sha.
+                cancel_runs(
+                    f"#{args.recut}",
+                    old["headRefName"],
+                    old["headRefOid"],
+                    head,
+                )
             for p in prs:
                 if p["state"] == "CLOSED":
                     reopen(p, args.remote, f"make train {again(args)}")
@@ -1058,7 +1156,7 @@ def compose_train(args: argparse.Namespace) -> int:
         # Published: from here on nothing may say REFUSED (gh-192 in
         # just-buildit.github.io). ``after_publish`` retries each close and,
         # if one still fails, says what is open and how to finish it.
-        return after_publish(url, head, args, [p["number"] for p in prs])
+        return after_publish(url, head, args, prs, branch)
     finally:
         git("switch", "--quiet", start, check=False)
         if not keep:
