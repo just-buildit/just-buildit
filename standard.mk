@@ -1993,7 +1993,7 @@ _STD_SECTION = case "$$t" in \
     bench|bench-save|bench-compare) tsec="Bench";; \
     coverage|coverage-gate) tsec="Coverage";; \
     bump-version|version-check|release-branch|tag-release|release-watch \
-        |ship|ci-changes|ci-tree-tested|ci-docs|ci-check-name \
+        |ship|ci-changes|ci-tree-tested|ci-docs|ci-check-name|ci-runner \
         |ci-changes-wiring-check|pr-watch|train) tsec="Release";; \
     changelog-check|changelog-sections-check|changelog-assemble \
         |changelog-assembled-check|changelog-version-check) tsec="Changelog";; \
@@ -2001,7 +2001,7 @@ _STD_SECTION = case "$$t" in \
     ci-image-config|ci-image-check|ci-image-build|ci-image-smoke|ci-image-base|ci-shell) \
         tsec="CI-image";; \
     packager-image-check|packager-image-build|packager-image-smoke) tsec="Packager-image";; \
-    standard-check|standard-update|standard-files|help-check|ghost-check|hook-dispatch-check|hook-stage-check|tracked-paths-check|workflow-timeout-check|workflow-dispatch-check|close-keywords-check) \
+    standard-check|standard-update|standard-files|help-check|ghost-check|hook-dispatch-check|hook-stage-check|tracked-paths-check|workflow-timeout-check|workflow-dispatch-check|close-keywords-check|self-hosted-check) \
         tsec="Gates";; \
     *) tsec="Local";; \
 esac
@@ -2651,6 +2651,80 @@ lint: close-keywords-check
 
 close-keywords-check: ## A PR's commits, title and body close only the issues it declares
 	@python3 scripts/close-keywords.py --base '$(CLOSE_KEYWORDS_BASE)'
+
+# ── self-hosted runners: ci-runner and self-hosted-check ───────────────────
+#
+# A self-hosted runner takes the legs GitHub-hosted capacity cancels or never
+# assigns, and a fork's pull request must never reach one: the repositories
+# are public, so its code would run on our machine (just-buildit.github.io
+# #203). Both halves are the vendored script; its docstring has the rules.
+#
+# `ci-runner` is a FILTER over a planner's $GITHUB_OUTPUT lines: each
+# `name=<matrix in include form>` line comes back with a `runs_on` on every
+# leg, and the job reads `runs-on: ${{ matrix.runs_on }}`. A leg gets the
+# self-hosted labels only when the run is not fork-driven, the repository
+# opted in (the variable JB_SELF_HOSTED_MACOS is `true`), a matching runner
+# is online and idle per the org runner API, read with the secret
+# JB_RUNNER_READ_TOKEN (GITHUB_TOKEN cannot read org runners), and this
+# repository's jobs already queued for it (read with GITHUB_TOKEN, `actions:
+# read`) leave one over. Any doubt keeps the hosted label. The planner runs
+# in a step of its own, so the token never reaches it:
+#
+#   permissions: {contents: read, actions: read}
+#   steps:
+#     - id: legs
+#       run: make -s <planner> >> "$GITHUB_OUTPUT"
+#     - id: runners
+#       env:
+#         LEGS: ${{ steps.legs.outputs.matrix }}
+#         JB_SELF_HOSTED_MACOS: ${{ vars.JB_SELF_HOSTED_MACOS }}
+#         JB_RUNNER_READ_TOKEN: ${{ secrets.JB_RUNNER_READ_TOKEN }}
+#         GITHUB_TOKEN: ${{ github.token }}
+#       run: >-
+#         printf 'matrix=%s\n' "$LEGS"
+#         | make -s ci-runner >> "$GITHUB_OUTPUT"
+#
+# printf cannot fail, so the pipe needs no pipefail. self-hosted-check
+# trusts that step only in exactly this shape -- printf of literals and
+# "$VARS", piped into `make ci-runner [NAME=value...] >> "$GITHUB_OUTPUT"`
+# -- with no earlier step that can change its environment, no `${{ }}` in
+# the script (GitHub pastes it in before bash reads it), and no PYTHON*,
+# LD_*, DYLD_*, GITHUB_* (but GITHUB_TOKEN) or RUNNER_* variable set. On a
+# workflow a fork can drive other than by plain pull_request (pull_request
+# _target, workflow_run, issue_comment, a review, or workflow_call), only
+# plain checkouts may come before it: declare the legs in the step's env.
+#
+#   CI_RUNNER_KEY           the leg keys naming its hosted label, first one
+#                           present wins.
+#   CI_RUNNER_WORKFLOW      the workflow file whose jobs the plan feeds
+#                           (`.github/workflows/ci.yml`). A runner group
+#                           restricted to selected workflows counts only for
+#                           it, and only when it is the run's own workflow;
+#                           empty, such a group never counts.
+#   SELF_HOSTED_CHECK_DIRS  where self-hosted-check reads workflows.
+#
+# `self-hosted-check` is in `lint`, on in every repo: it refuses a job whose
+# runs-on can resolve to a self-hosted runner -- any label no GitHub-hosted
+# image carries -- unless it comes from ci-runner or the job's `if:` is
+# false for every fork-driven event (pull requests, workflow_run,
+# issue_comment). It is a guard
+# against our own mistakes, not against a fork: a pull_request run uses the
+# fork's copy of the workflows, so the runner group's repository access and
+# the fork-PR approval policy are what stop a hostile one.
+CI_RUNNER_KEY          ?= runs_on os
+CI_RUNNER_WORKFLOW     ?=
+SELF_HOSTED_CHECK_DIRS ?= .github/workflows
+STD_TARGETS    += self-hosted-check ci-runner
+VENDORED_FILES += scripts/ci-runner.py
+
+lint: self-hosted-check
+
+self-hosted-check: ## Verify no fork can reach a self-hosted runner
+	@python3 scripts/ci-runner.py check $(SELF_HOSTED_CHECK_DIRS)
+
+ci-runner: ## Give each matrix leg on stdin a runs_on, self-hosted when free
+	@python3 scripts/ci-runner.py pick --key '$(CI_RUNNER_KEY)' \
+	    --workflow '$(CI_RUNNER_WORKFLOW)'
 
 # ── Help ─────────────────────────────────────────────────────────────────────
 # Generated from the `## description` on each active target's rule line. Never
