@@ -259,8 +259,8 @@ def http_fetch(api: str, token: str) -> Fetch:
     return get
 
 
-def _paged(fetch: Fetch, path: str, key: str) -> "list[dict]":
-    out: "list[dict]" = []
+def _paged(fetch: Fetch, path: str, key: str) -> "list[dict[str, Any]]":
+    out: "list[dict[str, Any]]" = []
     page = 1
     while True:
         sep = "&" if "?" in path else "?"
@@ -343,7 +343,7 @@ def queued(fetch: Fetch, repo: str) -> "dict[Pool, int]":
     runner is busy, and :func:`idle` has left it out. Read with the run's
     ``GITHUB_TOKEN`` (``actions: read``); raises on any API failure.
     """
-    runs: "dict[Any, dict]" = {}
+    runs: "dict[Any, dict[str, Any]]" = {}
     for status in ("queued", "in_progress"):
         for r in _paged(
             fetch,
@@ -373,8 +373,10 @@ def pool_of(label: str) -> "Pool | None":
 
 
 def allocate(
-    legs: "list[dict]", keys: "Iterable[str]", free: "dict[Pool, int]"
-) -> "list[dict]":
+    legs: "list[dict[str, Any]]",
+    keys: "Iterable[str]",
+    free: "dict[Pool, int]",
+) -> "list[dict[str, Any]]":
     """Each leg with a ``runs_on``; spends *free* in leg order.
 
     A leg's hosted label is the value of the first of *keys* it has, and
@@ -572,9 +574,12 @@ def _unquote(s: str) -> str:
         if not s.endswith('"') or len(s) < 2:
             raise YamlError(f"unterminated quote: {s}")
         try:
-            return json.loads(s.replace("\\/", "/"))
+            # A double-quoted scalar is a JSON string literal, so loads()
+            # yields a str; the annotation states it for the type checker.
+            text: str = json.loads(s.replace("\\/", "/"))
         except ValueError as e:
             raise YamlError(f"bad double-quoted scalar {s}: {e}") from e
+        return text
     return s
 
 
@@ -602,7 +607,7 @@ class _Flow:
         c = self.s[self.i : self.i + 1]
         if c == "[":
             self.i += 1
-            out = []
+            out: "list[Any]" = []
             while True:
                 self.ws()
                 if self.s[self.i : self.i + 1] == "]":
@@ -717,8 +722,8 @@ class Yaml:
             return self.mapping(i, ind)
         return self.inline(_strip_comment(text), i, ind - 1)
 
-    def seq(self, i: int, ind: int) -> "tuple[list, int]":
-        out = []
+    def seq(self, i: int, ind: int) -> "tuple[list[Any], int]":
+        out: "list[Any]" = []
         while True:
             i = self.skip(i)
             if i >= len(self.lines):
@@ -740,7 +745,7 @@ class Yaml:
                 item, i = self.block(i, col)
             out.append(item)
 
-    def mapping(self, i: int, ind: int) -> "tuple[dict, int]":
+    def mapping(self, i: int, ind: int) -> "tuple[dict[str, Any], int]":
         out: "dict[str, Any]" = {}
         while True:
             i = self.skip(i)
@@ -889,7 +894,7 @@ def _tokens(s: str) -> "list[tuple[str, str]]":
     return out
 
 
-def parse_expr(s: str) -> tuple:
+def parse_expr(s: str) -> "tuple[Any, ...]":
     """A GitHub expression (no ``${{ }}``) as a small AST of tuples."""
     toks = _tokens(s)
     pos = [0]
@@ -903,7 +908,7 @@ def parse_expr(s: str) -> tuple:
         pos[0] += 1
         return toks[pos[0] - 1]
 
-    def primary() -> tuple:
+    def primary() -> "tuple[Any, ...]":
         kind, v = take()
         if v == "(":
             e = orr()
@@ -948,26 +953,26 @@ def parse_expr(s: str) -> tuple:
                     node = ("index", node, idx)
         return node
 
-    def cmp_rel() -> tuple:
+    def cmp_rel() -> "tuple[Any, ...]":
         e = primary()
         while peek() in ("<", "<=", ">", ">="):
             e = ("cmp", take()[1], e, primary())
         return e
 
-    def cmp_eq() -> tuple:
+    def cmp_eq() -> "tuple[Any, ...]":
         e = cmp_rel()
         while peek() in ("==", "!="):
             e = ("cmp", take()[1], e, cmp_rel())
         return e
 
-    def andd() -> tuple:
+    def andd() -> "tuple[Any, ...]":
         e = cmp_eq()
         while peek() == "&&":
             take()
             e = ("and", e, cmp_eq())
         return e
 
-    def orr() -> tuple:
+    def orr() -> "tuple[Any, ...]":
         e = andd()
         while peek() == "||":
             take()
@@ -1053,7 +1058,7 @@ def _lookup(ctx: "dict[str, Any]", path: "tuple[str, ...]") -> Any:
     return v
 
 
-def evaluate(node: tuple, ctx: "dict[str, Any]") -> Any:
+def evaluate(node: "tuple[Any, ...]", ctx: "dict[str, Any]") -> Any:
     """*node*'s value in *ctx*, three-valued: UNKNOWN where it cannot know."""
     kind = node[0]
     if kind == "lit":
@@ -1111,7 +1116,7 @@ def evaluate(node: tuple, ctx: "dict[str, Any]") -> Any:
     raise ValueError(f"unknown node {kind}")
 
 
-def truth(node: tuple, ctx: "dict[str, Any]") -> Any:
+def truth(node: "tuple[Any, ...]", ctx: "dict[str, Any]") -> Any:
     return _truthy(evaluate(node, ctx))
 
 
@@ -1238,7 +1243,9 @@ class Workflow:
                 )
         return False
 
-    def values(self, node: tuple, job: dict) -> "list[Any]":
+    def values(
+        self, node: "tuple[Any, ...]", job: "dict[str, Any]"
+    ) -> "list[Any]":
         kind = node[0]
         if kind == "lit":
             return [node[1]]
@@ -1275,7 +1282,7 @@ class Workflow:
             raise Dynamic(f"{'.'.join(path)} can name any runner")
         raise Dynamic("an expression it cannot resolve")
 
-    def resolve(self, raw: Any, job: dict) -> "list[Any]":
+    def resolve(self, raw: Any, job: "dict[str, Any]") -> "list[Any]":
         """Every value *raw* (a YAML value) can take.
 
         ci-runner's output is trusted only as a WHOLE matrix (``matrix:
@@ -1306,7 +1313,9 @@ class Workflow:
             raise Dynamic(str(e)) from e
         return self.values(tree, job)
 
-    def matrix(self, job: dict, path: "tuple[str, ...]") -> "list[Any]":
+    def matrix(
+        self, job: "dict[str, Any]", path: "tuple[str, ...]"
+    ) -> "list[Any]":
         m = (job.get("strategy") or {}).get("matrix")
         if m is None:
             return [None]
@@ -1358,7 +1367,7 @@ class Workflow:
             if not ok:
                 yield name, f"{why}; {how}"
 
-    def reaches(self, job: dict) -> str:
+    def reaches(self, job: "dict[str, Any]") -> str:
         """Why *job* can run self-hosted, or ``""`` if it cannot (or only
         through ci-runner)."""
         try:
@@ -1472,10 +1481,10 @@ def run_shape_ok(run: str) -> bool:
 
 
 def trusted_step(
-    step: dict,
-    before: "list[dict]",
-    job: dict,
-    doc: dict,
+    step: "dict[str, Any]",
+    before: "list[dict[str, Any]]",
+    job: "dict[str, Any]",
+    doc: "dict[str, Any]",
     events: "Iterable[str]" = (),
 ) -> bool:
     """Whether *step*'s outputs can only be what ``make ci-runner`` wrote.
