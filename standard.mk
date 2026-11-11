@@ -945,6 +945,19 @@ endif
 #   TRAIN_BRANCH  the train's branch (default: train/<n>-<n>...)
 #   TRAIN_TITLE   the train PR's title (default: train: #<n>, #<n>)
 #
+# `make train-retire TRAIN=<n>` retires a MERGED train's constituents'
+# branches (just-buildit.github.io#219). GitHub deletes a branch on merge
+# only for the PR that merged, and the train closed its constituents
+# unmerged; they cannot go when it closes them, since a re-cut reads each
+# head from its branch. It reads the train's table (the reader --recut
+# uses) and deletes each branch whose remote head is still the recorded
+# one, by a push leased to that head; one that moved, is open again, is in
+# a fork or has no recorded head is kept and named. A PR with no table is
+# a no-op, and a branch already gone is done. The vendored
+# .github/workflows/train-retire.yml runs it on every merged PR from this
+# repository, so nobody has to remember; dispatch it with `train` to
+# retire an older train by hand.
+#
 # Always on, like close-keywords-check: it needs only python3, git and gh,
 # which every repo here already has.
 #
@@ -958,8 +971,8 @@ TRAIN_GATE   ?= $(if $(filter pyext,$(STD_TARGETS)),make pyext && )make lint
 TRAIN_BASE   ?= main
 TRAIN_BRANCH ?=
 TRAIN_TITLE  ?=
-STD_TARGETS    += train
-VENDORED_FILES += scripts/train.py
+STD_TARGETS    += train train-retire
+VENDORED_FILES += scripts/train.py .github/workflows/train-retire.yml
 
 train: ## PRS="<n> <n>..."|RECUT=<n> [PUSH=1] — land ready PRs as ONE PR, so CI runs once (never merges)
 	@test -n '$(strip $(PRS)$(RECUT))' || { \
@@ -973,6 +986,11 @@ train: ## PRS="<n> <n>..."|RECUT=<n> [PUSH=1] — land ready PRs as ONE PR, so C
 	    $(if $(strip $(RECUT)),--recut '$(strip $(RECUT))') \
 	    $(if $(strip $(MOVED)),--moved '$(strip $(MOVED))') \
 	    $(if $(filter 1,$(PUSH)),--push) $(PRS)
+
+train-retire: ## TRAIN=<n> — delete a merged train's constituent branches still at their recorded heads
+	@test -n '$(strip $(TRAIN))' || { \
+	    echo 'usage: make train-retire TRAIN=<merged train PR>'; exit 2; }
+	@python3 scripts/train.py --retire '$(strip $(TRAIN))'
 
 # ── HAS_RELEASE ──────────────────────────────────────────────────────────────
 # The release workflow, in dependency order: release-branch (bump on a branch)
@@ -1994,7 +2012,7 @@ _STD_SECTION = case "$$t" in \
     coverage|coverage-gate) tsec="Coverage";; \
     bump-version|version-check|release-branch|tag-release|release-watch \
         |ship|ci-changes|ci-tree-tested|ci-docs|ci-check-name|ci-runner \
-        |ci-changes-wiring-check|pr-watch|train) tsec="Release";; \
+        |ci-changes-wiring-check|pr-watch|train|train-retire) tsec="Release";; \
     changelog-check|changelog-sections-check|changelog-assemble \
         |changelog-assembled-check|changelog-version-check) tsec="Changelog";; \
     test-examples) tsec="Examples";; \
