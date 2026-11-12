@@ -945,6 +945,19 @@ endif
 #   TRAIN_BRANCH  the train's branch (default: train/<n>-<n>...)
 #   TRAIN_TITLE   the train PR's title (default: train: #<n>, #<n>)
 #
+# `make train-retire TRAIN=<n>` retires a MERGED train's constituents'
+# branches (just-buildit.github.io#219). GitHub deletes a branch on merge
+# only for the PR that merged, and the train closed its constituents
+# unmerged; they cannot go when it closes them, since a re-cut reads each
+# head from its branch. It reads the train's table (the reader --recut
+# uses) and deletes each branch whose remote head is still the recorded
+# one, by a push leased to that head; one that moved, is open again, is in
+# a fork or has no recorded head is kept and named. A PR with no table is
+# a no-op, and a branch already gone is done. The vendored
+# .github/workflows/train-retire.yml runs it on every merged PR from this
+# repository, so nobody has to remember; dispatch it with `train` to
+# retire an older train by hand.
+#
 # Always on, like close-keywords-check: it needs only python3, git and gh,
 # which every repo here already has.
 #
@@ -958,8 +971,8 @@ TRAIN_GATE   ?= $(if $(filter pyext,$(STD_TARGETS)),make pyext && )make lint
 TRAIN_BASE   ?= main
 TRAIN_BRANCH ?=
 TRAIN_TITLE  ?=
-STD_TARGETS    += train
-VENDORED_FILES += scripts/train.py
+STD_TARGETS    += train train-retire
+VENDORED_FILES += scripts/train.py .github/workflows/train-retire.yml
 
 train: ## PRS="<n> <n>..."|RECUT=<n> [PUSH=1] — land ready PRs as ONE PR, so CI runs once (never merges)
 	@test -n '$(strip $(PRS)$(RECUT))' || { \
@@ -974,6 +987,11 @@ train: ## PRS="<n> <n>..."|RECUT=<n> [PUSH=1] — land ready PRs as ONE PR, so C
 	    $(if $(strip $(MOVED)),--moved '$(strip $(MOVED))') \
 	    $(if $(filter 1,$(PUSH)),--push) $(PRS)
 
+train-retire: ## TRAIN=<n> — delete a merged train's constituent branches still at their recorded heads
+	@test -n '$(strip $(TRAIN))' || { \
+	    echo 'usage: make train-retire TRAIN=<merged train PR>'; exit 2; }
+	@python3 scripts/train.py --retire '$(strip $(TRAIN))'
+
 # ── HAS_RELEASE ──────────────────────────────────────────────────────────────
 # The release workflow, in dependency order: release-branch (bump on a branch)
 # -> PR -> merge -> tag-release -> release-watch, with `ship` doing the last
@@ -981,7 +999,7 @@ train: ## PRS="<n> <n>..."|RECUT=<n> [PUSH=1] — land ready PRs as ONE PR, so C
 ifeq ($(HAS_RELEASE),1)
 STD_TARGETS += bump-version version-check release-branch tag-release \
                release-watch ship ci-changes ci-tree-tested ci-docs \
-               ci-check-name ci-changes-wiring-check
+               ci-check-name ci-changes-wiring-check release-verify-ci
 
 BUMP_VERSION_CMD  ?=
 RELEASE_WATCH_CMD ?=
@@ -1502,6 +1520,30 @@ endif
 	@git push origin "v$(VERSION)"
 	@echo "Tagged v$(VERSION) — release workflow starting on GitHub"
 
+# "Did main's CI certify this commit?" -- ONE script answers it for both
+# askers: a release workflow's verify job (`release-verify-ci`, before
+# anything is published) and `release-watch.sh` when that job failed (is CI
+# still running, green, red, or past repair?). Each used to carry its own
+# poll, and they disagreed: the watch's read a failed API call as "CI
+# finished" and spent the release's one recovery on a CI still queued
+# (just-buildit.github.io#226, just-makeit v0.128.0). The waiting rule and
+# every verdict: the script's docstring. The check name and the CI
+# workflow's file are this file's variables, exported to both askers --
+# through the environment, so a RELEASE_WATCH_CMD of any shape (an `@`
+# prefix, a `define`) receives them untouched. A plain `export`, not a
+# target-specific `export X := $(X)`: that expands where it is read, so a
+# repo that sets CI_CHECK_NAME after `include standard.mk` would export the
+# default; this exports whatever the variable holds when the recipe runs.
+VENDORED_FILES += scripts/verify-ci.py
+CI_WORKFLOW ?= $(notdir $(GATES_CI_FILE))
+export CI_CHECK_NAME CI_WORKFLOW
+
+# For a release workflow's verify step: REPO, SHA and GH_TOKEN (actions:
+# read, checks: read) come from the step's env, and the job's own
+# timeout-minutes is the only cap on waiting for a live run.
+release-verify-ci: ## REPO= SHA= — wait while main's CI for SHA is alive, then require it green
+	@python3 scripts/verify-ci.py
+
 release-watch: ## VERSION=x.y.z — watch the release workflow and verify it
 ifndef VERSION
 	@echo "usage: make release-watch VERSION=<x.y.z>"
@@ -1994,7 +2036,8 @@ _STD_SECTION = case "$$t" in \
     coverage|coverage-gate) tsec="Coverage";; \
     bump-version|version-check|release-branch|tag-release|release-watch \
         |ship|ci-changes|ci-tree-tested|ci-docs|ci-check-name|ci-runner \
-        |ci-changes-wiring-check|pr-watch|train) tsec="Release";; \
+        |ci-changes-wiring-check|pr-watch|train|train-retire \
+        |release-verify-ci) tsec="Release";; \
     changelog-check|changelog-sections-check|changelog-assemble \
         |changelog-assembled-check|changelog-version-check) tsec="Changelog";; \
     test-examples) tsec="Examples";; \

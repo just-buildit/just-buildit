@@ -323,15 +323,21 @@ def idle(
             continue
         usable.add(g["id"])
     counts = {p: 0 for p in POOLS}
-    for r in _paged(fetch, f"/orgs/{org}/actions/runners", "runners"):
-        if r.get("runner_group_id") not in usable:
-            continue
-        if r.get("status") != "online" or r.get("busy") is not False:
-            continue
-        have = {str(x.get("name", "")).lower() for x in r.get("labels", [])}
-        for p in POOLS:
-            if {x.lower() for x in p.labels} <= have:
-                counts[p] += 1
+    # A runner's group is read from the group's own listing. The org-wide
+    # `/actions/runners` carries no group field at all, so filtering it on
+    # one excluded every runner and no leg ever went self-hosted.
+    for gid in sorted(usable):
+        for r in _paged(
+            fetch, f"/orgs/{org}/actions/runner-groups/{gid}/runners", "runners"
+        ):
+            if r.get("status") != "online" or r.get("busy") is not False:
+                continue
+            have = {
+                str(x.get("name", "")).lower() for x in r.get("labels", [])
+            }
+            for p in POOLS:
+                if {x.lower() for x in p.labels} <= have:
+                    counts[p] += 1
     return counts
 
 
