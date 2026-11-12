@@ -46,7 +46,9 @@ What this script does, failing closed at every step:
 8. Without ``--push``, stops there: a dry run. It deletes the train branch
    and puts you back where you were. With ``--push`` it pushes the branch,
    opens the train PR and closes each constituent with a comment linking
-   it. Their branches are kept, for the train's merge to retire.
+   it. Their branches are kept: a re-cut reads each head from its
+   branch, so they must outlive a red train. Once the train MERGES, the
+   vendored ``train-retire`` workflow retires them (``--retire``, below).
 9. Cancels each closed constituent's in-progress and queued workflow
    runs of the head the train took (``cancel_runs``). Closing a PR does
    not cancel its CI, and that CI can gate nothing once the train's run
@@ -115,6 +117,33 @@ A re-cut:
    recovers (the constituents it reopened read as open, the rest are
    reopened). MOVED names a PR, not a sha, so that check is the reader's.
 
+Retire (``--retire T``), once train ``T`` has merged. GitHub deletes a
+branch on merge only for the PR that merged, and the train closed its
+constituents unmerged, so nothing else removes their branches
+(just-buildit.github.io#219). ``.github/workflows/train-retire.yml`` runs
+this on every merged pull request of the repository's own (never a
+fork's), through ``make train-retire TRAIN=<n>``:
+
+1. Reads ``T``; refuses one that is not merged, since a re-cut still needs
+   its constituents' branches. A body with no ``| #N |`` rows is not a
+   train, and retires nothing.
+2. Reads each constituent and its recorded head from ``T``'s table with
+   ``constituents``, the reader a re-cut uses, and its branch name from
+   GitHub (``headRefName``; the table does not hold it).
+3. Keeps, and names, a branch it cannot vouch for: a constituent with no
+   recorded head (a train cut before ``source``), one in a fork (not ours
+   to delete), one open again (live work), and one whose remote head is
+   not the recorded one (it moved after the train took it).
+4. Deletes the rest with ``git push --force-with-lease=<ref>:<head>``, so
+   the remote deletes it only if it is still at the recorded head: a push
+   landing between the read and the delete keeps the branch. A branch
+   already gone is done, so a re-run is harmless.
+
+Exit 0 when every branch is deleted, gone or kept for a stated reason; 1
+when the train is not merged, or a delete failed for another reason.
+Under GitHub Actions each kept branch is also a ``::warning::``, and the
+outcome goes to the job summary (``GITHUB_STEP_SUMMARY``).
+
 Environment: ``GH`` names the gh binary (default ``gh``), which is how the
 tests substitute a fake. ``TRAIN_RETRY_DELAY`` is the first wait, in
 seconds, between tries of a step after publishing; the tests set it to 0.
@@ -122,6 +151,7 @@ seconds, between tries of a step after publishing; the tests set it to 0.
 Usage:  train.py [--base main] [--remote origin] [--branch NAME]
                  [--title TEXT] [--gate CMD] [--push] PR [PR ...]
         train.py [options] --recut T [--moved PR ...]
+        train.py [--remote origin] --retire T
 """
 
 from __future__ import annotations
@@ -440,7 +470,8 @@ def body_for(
         "--stable` and full message equal its source PR's commit, and "
         f"`{gate}` passed on the combined tree.\n\n"
         f"Supersedes {nums}; each PR's own description has its detail. "
-        "Their branches are kept until this merges.\n"
+        "Their branches are kept until this merges; then `train-retire` "
+        "deletes each one still at the head recorded above.\n"
     )
 
 
@@ -1163,6 +1194,90 @@ def compose_train(args: argparse.Namespace) -> int:
             git("branch", "--quiet", "-D", work, check=False)
 
 
+def retire_one(n: int, was: str | None, remote: str) -> tuple[str, str]:
+    """Retires constituent ``n``'s branch if it is still at ``was``.
+
+    Returns ``(outcome, line)``: outcome is ``deleted``, ``gone``, ``kept``
+    or ``failed``, and line says which branch and why.
+    """
+    pr: dict[str, Any] = json.loads(
+        gh(
+            "pr",
+            "view",
+            str(n),
+            "--json",
+            "number,state,headRefName,isCrossRepository",
+        )
+    )
+    br = pr.get("headRefName") or ""
+    if pr.get("isCrossRepository"):
+        return "kept", f"#{n}: its branch {br} is in a fork, not ours"
+    if not was:
+        return "kept", f"#{n}: {br} -- the train recorded no head for it"
+    if pr["state"] == "OPEN":
+        return "kept", f"#{n}: {br} -- the PR is open again"
+    ref = f"refs/heads/{br}"
+    line = git("ls-remote", "--heads", remote, ref)
+    if not line:
+        return "gone", f"#{n}: {br} is already gone"
+    tip = line.split()[0]
+    if tip != was:
+        return "kept", (
+            f"#{n}: {br} moved after the train took it: "
+            f"{was[:9]} -> {tip[:9]}"
+        )
+    # The lease makes the compare and the delete one step on the remote:
+    # a push landing after the ls-remote above keeps the branch.
+    p = run(
+        "git",
+        "push",
+        "--quiet",
+        f"--force-with-lease={ref}:{was}",
+        remote,
+        f":{ref}",
+        check=False,
+    )
+    if p.returncode == 0:
+        return "deleted", f"#{n}: {br} deleted at {was[:9]}"
+    err = (p.stderr or p.stdout).strip()
+    if "stale info" in err:
+        return "kept", f"#{n}: {br} moved while it was being retired"
+    return "failed", f"#{n}: {br} could not be deleted: {err}"
+
+
+def retire(t: int, remote: str) -> int:
+    """``--retire T``: deletes merged train ``T``'s constituents' branches
+    that are still at the head the train recorded (see the module
+    docstring)."""
+    tr: dict[str, Any] = json.loads(
+        gh("pr", "view", str(t), "--json", "number,state,body")
+    )
+    if tr["state"] != "MERGED":
+        print(
+            f"train-retire: REFUSED -- #{t} is {tr['state'].lower()}, not "
+            "merged; a re-cut still needs its constituents' branches"
+        )
+        return 1
+    heads = constituents(tr["body"] or "")
+    if not heads:
+        print(f"train-retire: #{t} is not a train; nothing to retire")
+        return 0
+    done: list[tuple[str, str]] = [
+        retire_one(n, was, remote) for n, was in heads.items()
+    ]
+    actions = os.environ.get("GITHUB_ACTIONS") == "true"
+    for outcome, line in done:
+        print(f"train-retire: {outcome}: {line}")
+        if actions and outcome in ("kept", "failed"):
+            print(f"::warning::train-retire #{t}: {outcome}: {line}")
+    summary = os.environ.get("GITHUB_STEP_SUMMARY")
+    if summary:
+        with open(summary, "a", encoding="utf-8") as f:
+            f.write(f"### Train #{t}: constituent branches\n\n")
+            f.writelines(f"- **{o}** {line}\n" for o, line in done)
+    return 1 if any(o == "failed" for o, _ in done) else 0
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(
         description=__doc__.split("\n", 1)[0],
@@ -1195,7 +1310,24 @@ def main(argv: list[str] | None = None) -> int:
         help="with --recut: constituents whose moved head was reviewed, "
         "comma or space separated, as ONE argument",
     )
+    ap.add_argument(
+        "--retire",
+        type=int,
+        default=0,
+        metavar="T",
+        help="delete merged train T's constituents' branches still at "
+        "the head it recorded",
+    )
     args = ap.parse_args(argv)
+    if args.retire:
+        if args.prs or args.recut or args.moved or args.push:
+            print("train: REFUSED -- --retire T takes no other operation")
+            return 1
+        try:
+            return retire(args.retire, args.remote)
+        except RefusedError as e:
+            print(f"train-retire: REFUSED -- {e}")
+            return 1
     try:
         args.moved = {int(x) for x in re.split(r"[,\s]+", args.moved) if x}
     except ValueError:

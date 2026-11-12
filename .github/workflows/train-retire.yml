@@ -1,0 +1,59 @@
+name: train-retire
+
+# VENDORED from canonical (the train section of standard.mk) -- change it
+# there, not here; standard-check fails on any difference. The logic is
+# `make train-retire`, so this file holds none of it.
+#
+# A train (`make train`) closes its constituent PRs unmerged, and GitHub's
+# delete-branch-on-merge fires only for the PR that merged: the train's own
+# branch goes, theirs never do (just-makeit carried 75 of them,
+# just-buildit.github.io#219). They cannot go when the train closes them,
+# because a re-cut reads each head from its branch, so they are retired
+# here, once the train MERGES: each one still at the head the train's table
+# recorded is deleted; one that moved is kept and named in the summary. A
+# merged PR that is not a train has no table and retires nothing.
+#
+# Never for a fork's pull request: a train is cut from this repository's
+# own branches, and a fork's run gets a read-only token anyway. Dispatch it
+# with `train` to retire an older merged train by hand.
+
+on:
+  pull_request:
+    types: [closed]
+  workflow_dispatch:
+    inputs:
+      train:
+        description: "The merged train PR whose constituents to retire"
+        required: true
+        type: number
+
+# Every `run:` under pipefail, as in changes.yml (doppler#1819).
+defaults:
+  run:
+    shell: bash
+
+permissions: {}
+
+jobs:
+  retire:
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      || (github.event.pull_request.merged == true
+      && github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # contents: write deletes the branches, through the push credentials
+    # actions/checkout leaves behind; pull-requests: read reads the train
+    # and each constituent's branch name.
+    permissions:
+      contents: write
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - name: Delete each constituent branch still at its recorded head
+        # The number arrives through env, never pasted into the script.
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TRAIN: ${{ github.event.pull_request.number || inputs.train }}
+        run: make -s train-retire TRAIN="$TRAIN"
