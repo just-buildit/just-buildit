@@ -125,8 +125,9 @@ this on every merged pull request of the repository's own (never a
 fork's), through ``make train-retire TRAIN=<n>``:
 
 1. Reads ``T``; refuses one that is not merged, since a re-cut still needs
-   its constituents' branches. A body with no ``| #N |`` rows is not a
-   train, and retires nothing.
+   its constituents' branches. A body without the table ``make train``
+   writes (its ``| commit | from |`` header) is not a train, and retires
+   nothing.
 2. Reads each constituent and its recorded head from ``T``'s table with
    ``constituents``, the reader a re-cut uses, and its branch name from
    GitHub (``headRefName``; the table does not hold it).
@@ -188,6 +189,11 @@ CLOSING_QUERY = (
 #: A row of the train's table: ``| `subject` | #N | `source sha` |``. The
 #: source column is absent from trains cut before it existed.
 ROW = re.compile(r"\| #(\d+) \|(?: `([0-9a-f]{40})` \|)?\s*$")
+#: The header ``body_for`` writes above those rows, the one thing that makes
+#: a body a train's (#237): any PR's body may hold a table whose last cell
+#: is ``#N``, so a row alone says nothing. ``source`` is absent from a
+#: train cut before that column existed.
+HEADER = re.compile(r"^\| commit \| from \|(?: source \|)?\s*$")
 
 #: How long a re-cut waits for GitHub to report a reopened PR's new head.
 VERIFY_TRIES = 10
@@ -496,7 +502,7 @@ def read_train(t: int, base: str) -> dict[str, Any]:
     tr["heads"] = constituents(tr["body"])
     if not tr["heads"]:
         raise RefusedError(
-            f"#{t} is not a train: its body has no `| #N |` rows"
+            f"#{t} is not a train: its body has no train table"
         )
     return tr
 
@@ -516,9 +522,33 @@ def constituents(body: str) -> dict[int, str | None]:
     >>> heads = constituents(body)
     >>> list(heads), heads[3][:4], heads[5]
     ([3, 5], '2222', None)
+
+    Only rows under that table's own header are read, up to the first line
+    that is not a table row: another table in the body -- an issue list
+    whose last cell is ``#N`` -- is not a train's (#237).
+
+    >>> constituents("| item | issue |\\n|---|---|\\n| `x` | #7 |\\n")
+    {}
+
+    A train's table beside other tables reads only the train's rows:
+
+    >>> issues = "| item | issue |\\n|---|---|\\n| `x` | #7 |\\n"
+    >>> train_t = ("| commit | from | source |\\n|---|---|---|\\n"
+    ...            "| `a` | #3 | `" + "1" * 40 + "` |\\n")
+    >>> list(constituents(issues + "\\n" + train_t + "\\n" + issues))
+    [3]
     """
     heads: dict[int, str | None] = {}
+    inside = False
     for line in body.splitlines():
+        if HEADER.match(line):
+            inside = True
+            continue
+        if not inside:
+            continue
+        if not line.startswith("|"):
+            inside = False
+            continue
         m = ROW.search(line)
         if m:
             heads[int(m.group(1))] = m.group(2)

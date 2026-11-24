@@ -1144,6 +1144,25 @@ version-check: ## [VERSION=x.y.z] Verify version strings agree
 # holding both the project's version and a dependency's at the same value
 # cannot be split, and runs everything.
 #
+# A release can also move a version written in a form the probe does not
+# print: doppler's package name `libdoppler-dsp0.85_0.85.0_amd64.deb`
+# carries the ABI major.minor, which becomes `0.86` with `0.86.0`
+# (just-buildit.github.io#239). CI_DERIVED_VERSION_TOKENS names such forms,
+# whitespace-separated, each a template of the probed `X.Y.Z` over
+# `{major}`, `{minor}` and `{patch}` (`libdoppler-dsp{major}.{minor}`).
+# Each template is filled from the old version and from the new one, and a
+# changed line is then expected to be BASE's line with the old version AND
+# every filled old token replaced by its new counterpart, in one pass
+# (leftmost match first, the longest at a tie), so a replacement is never
+# itself replaced. Only a token as written is accepted: a bare `0.85` ->
+# `0.86` elsewhere, as in `took 0.85 seconds`, still runs everything, and
+# so does a changed line where a configured token stayed. Empty by default;
+# a repo sets it in its own Makefile, and it reaches the recipe through the
+# environment, so braces and quotes arrive untouched.
+# Keep each template specific: a bare `{minor}` or `{major}.{minor}` is
+# accepted on ANY changed line, source code included, so it widens what a
+# bump may change to every such number in the tree.
+#
 # Each path is read from its `git diff --raw` record -- its old and new
 # mode, and the two blobs compared -- never from a list of names: a name
 # list has no modes, so a bump plus `chmod +x` on a script compared equal
@@ -1162,6 +1181,8 @@ version-check: ## [VERSION=x.y.z] Verify version strings agree
 # reason goes to stderr. BASE defaults to HEAD^ (a PR's merge commit, or a
 # single pushed commit); a workflow passes the pushed range's `before`.
 CI_INERT_RE ?= ^(CHANGELOG\.md|changelog\.d/.+)$$
+CI_DERIVED_VERSION_TOKENS ?=
+export CI_DERIVED_VERSION_TOKENS
 
 ci-changes: ## [BASE=<rev>] src=false when HEAD is only a version bump over BASE
 	@base="$${BASE:-HEAD^}"; \
@@ -1198,13 +1219,39 @@ ci-changes: ## [BASE=<rev>] src=false when HEAD is only a version bump over BASE
 	         && git cat-file blob "$$4" > "$$tmp/got" \
 	         || say true "cannot read $$f at $$base or HEAD"; \
 	     OLD="$$old" NEW="$$new" EOL=$$(tail -c1 "$$tmp/was" | wc -l) awk ' \
-	       function bump(s,   o, i) { \
+	       function lit(s, a, b,   o, i) { \
 	         o = ""; \
-	         while ((i = index(s, ENVIRON["OLD"])) > 0) { \
-	           o = o substr(s, 1, i - 1) ENVIRON["NEW"]; \
-	           s = substr(s, i + length(ENVIRON["OLD"])); \
+	         while ((i = index(s, a)) > 0) { \
+	           o = o substr(s, 1, i - 1) b; s = substr(s, i + length(a)); \
 	         } \
 	         return o s; \
+	       } \
+	       function fill(t, v,   p) { \
+	         split(v, p, "."); \
+	         return lit(lit(lit(t, "{major}", p[1]), "{minor}", p[2]), \
+	                    "{patch}", p[3]); \
+	       } \
+	       BEGIN { \
+	         np = 1; from[1] = ENVIRON["OLD"]; to[1] = ENVIRON["NEW"]; \
+	         nt = split(ENVIRON["CI_DERIVED_VERSION_TOKENS"], tpl); \
+	         for (k = 1; k <= nt; k++) { \
+	           a = fill(tpl[k], from[1]); b = fill(tpl[k], to[1]); \
+	           if (a != "" && a != b) { np++; from[np] = a; to[np] = b; } \
+	         } \
+	       } \
+	       function bump(s,   o, i, k, at, w) { \
+	         o = ""; \
+	         for (;;) { \
+	           at = 0; \
+	           for (k = 1; k <= np; k++) { \
+	             i = index(s, from[k]); \
+	             if (i > 0 && (!at || i < at || (i == at \
+	                 && length(from[k]) > length(from[w])))) { at = i; w = k; } \
+	           } \
+	           if (!at) return o s; \
+	           o = o substr(s, 1, at - 1) to[w]; \
+	           s = substr(s, at + length(from[w])); \
+	         } \
 	       } \
 	       FILENAME == ARGV[1] { got[FNR] = $$0; next } \
 	       { if (FNR > 1) printf "\n"; \
@@ -1282,7 +1329,23 @@ ci-check-name: ## Print CI_CHECK_NAME, the aggregate check's name
 #   - the call itself (`uses: ./.github/workflows/changes.yml`);
 #   - gated: it `needs:` that job and its text reads `needs.<id>.outputs`;
 #   - the aggregator, the job whose `name:` is CI_CHECK_NAME -- it runs
-#     always() and counts a skipped matrix as passed;
+#     always() and counts a skipped matrix as passed. Its `if:` is exactly
+#     always(): a job whose `if:` is false still reports, as a SKIPPED
+#     check of the required name, which branch protection counts as
+#     passing, and an ABSENT `if:` is one that can be false -- the
+#     aggregator `needs:` the matrix, so GitHub ANDs in success() and a
+#     failed need skips it. Its `name:` is CI_CHECK_NAME literally, or an
+#     expression that yields it on the gate only (`${{ <cond> && 'CI
+#     passed' || ... || '<other>' }}`, just-buildit.github.io#241), so a
+#     run that is not the gate -- doppler's minimal and skip pushes --
+#     reports under another name. scripts/ci-gate-name.py inspects that
+#     shape and never evaluates it. A job is taken for the aggregator when
+#     its literal name is CI_CHECK_NAME, or its name holds `${{` and the
+#     quoted literal 'CI_CHECK_NAME' (case aside), and two such jobs are
+#     refused, as is any job whose double-quoted `name:` holds a backslash
+#     escape (YAML decodes it, so it could spell the name unseen). A name
+#     that reaches the required value another way -- format(), a context
+#     such as `CI ${{ matrix.w }}` -- is NOT detected;
 #   - after the aggregator: it `needs:` it (a mirror trigger, a deploy) AND
 #     its `if:` says always(). Without a status function GitHub ANDs in
 #     success(), which is false when anything upstream was SKIPPED -- so on
@@ -1306,6 +1369,7 @@ ci-check-name: ## Print CI_CHECK_NAME, the aggregate check's name
 # line or the next -- just-buildit's aggregator writes it that way), or as a
 # block list.
 CI_ALWAYS_RUN_JOBS ?=
+VENDORED_FILES += scripts/ci-gate-name.py
 
 lint: ci-changes-wiring-check
 
@@ -1319,6 +1383,15 @@ ci-changes-wiring-check: ## Verify GATES_CI_FILE gates every job on the vendored
 	   function lead(s) { match(s, /^ */); return RLENGTH } \
 	   function val(s) { sub(/^[^:]*:[[:space:]]*/, "", s); sub(/[[:space:]]+#.*$$/, "", s); \
 	                     gsub(/^["\047]|["\047]$$/, "", s); return s } \
+	   function rawval(s,  q, i, c) { sub(/^[^:]*:[[:space:]]*/, "", s); q = substr(s, 1, 1); \
+	     if (q == "\"" || q == "\047") { \
+	       for (i = 2; i <= length(s); i++) { c = substr(s, i, 1); \
+	         if (q == "\"" && c == "\\") { i++; continue } \
+	         if (c != q) continue; \
+	         if (q == "\047" && substr(s, i + 1, 1) == "\047") { i++; continue } \
+	         return substr(s, 1, i) } \
+	       return s } \
+	     sub(/[[:space:]]+#.*$$/, "", s); return s } \
 	   function addneeds(j, s) { gsub(/[][,]/, " ", s); needs[j] = needs[j] " " s " " } \
 	   /^[[:space:]]*(#|$$)/ { next } \
 	   /^jobs:[[:space:]]*(#.*)?$$/ { injobs = 1; next } \
@@ -1336,7 +1409,8 @@ ci-changes-wiring-check: ## Verify GATES_CI_FILE gates every job on the vendored
 	     if (n == ai) { \
 	       inneeds = 0; \
 	       if ($$0 ~ /^ *uses:/) uses[job] = val($$0); \
-	       else if ($$0 ~ /^ *name:/) nm[job] = val($$0); \
+	       else if ($$0 ~ /^ *name:/) { nm[job] = val($$0); rawnm[job] = rawval($$0) } \
+	       else if ($$0 ~ /^ *if:/) iff[job] = rawval($$0); \
 	       else if ($$0 ~ /^ *needs:/) { v = val($$0); if (v == "") inneeds = 1; else addneeds(job, v) } \
 	       next \
 	     } \
@@ -1349,10 +1423,14 @@ ci-changes-wiring-check: ## Verify GATES_CI_FILE gates every job on the vendored
 	     for (i = 1; i <= total; i++) seen[order[i]] = 1; \
 	     for (k in isalways) if (!(k in seen)) print "STALE " k; \
 	     for (i = 1; i <= total; i++) { j = order[i]; \
+	       if (substr(rawnm[j], 1, 1) == "\"" && index(rawnm[j], "\\")) print "ESCNAME " j } \
+	     for (i = 1; i <= total; i++) { j = order[i]; \
 	       if (uses[j] ~ /^\.\/\.github\/workflows\/changes\.ya?ml$$/) c = j; \
-	       if (nm[j] == agg) a = j } \
+	       if (tolower(nm[j]) == tolower(agg) || (index(rawnm[j], "$${{") && index(tolower(rawnm[j]), "\047" tolower(agg) "\047"))) { \
+	         if (a != "") print "DUPAGG " a " " j; a = j } } \
 	     if (c == "") { print "NOCALL"; exit } \
 	     if (a == "") { print "NOAGG"; exit } \
+	     print "AGG " a; print "AGGNAME " rawnm[a]; print "AGGIF " iff[a]; \
 	     for (i = 1; i <= total; i++) { j = order[i]; \
 	       if (j == c || j == a || (j in isalways)) continue; \
 	       if (index(needs[j], " " a " ")) { \
@@ -1383,6 +1461,26 @@ ci-changes-wiring-check: ## Verify GATES_CI_FILE gates every job on the vendored
 	     echo "  The aggregator is what turns a skipped matrix into a pass."; \
 	     exit 1; \
 	 fi; \
+	 esc=$$(printf '%s\n' "$$out" | sed -n 's/^ESCNAME //p'); \
+	 if [ -n "$$esc" ]; then \
+	     echo "ERROR: $$ci jobs whose double-quoted name: holds a backslash escape:"; \
+	     printf '%s\n' "$$esc" | sed 's/^/  /'; \
+	     echo "  YAML decodes it (\"CI\\x20passed\" is 'CI passed'), so such a name"; \
+	     echo "  can carry '$(CI_CHECK_NAME)' unseen. Write the character itself."; \
+	     exit 1; \
+	 fi; \
+	 dup=$$(printf '%s\n' "$$out" | sed -n 's/^DUPAGG //p'); \
+	 if [ -n "$$dup" ]; then \
+	     echo "ERROR: $$ci has more than one job that can be named '$(CI_CHECK_NAME)':"; \
+	     printf '%s\n' "$$dup" | sed 's/^/  /'; \
+	     echo "  Each reports a check of the required name on the same commit,"; \
+	     echo "  and a ruleset may read whichever is newest. Keep one."; \
+	     exit 1; \
+	 fi; \
+	 python3 scripts/ci-gate-name.py --check-name '$(CI_CHECK_NAME)' \
+	     --job "$$(printf '%s\n' "$$out" | sed -n 's/^AGG //p')" \
+	     --name "$$(printf '%s\n' "$$out" | sed -n 's/^AGGNAME //p')" \
+	     --if "$$(printf '%s\n' "$$out" | sed -n 's/^AGGIF //p')" || exit 1; \
 	 stale=$$(printf '%s\n' "$$out" | sed -n 's/^STALE //p'); \
 	 if [ -n "$$stale" ]; then \
 	     echo "ERROR: CI_ALWAYS_RUN_JOBS names jobs $$ci does not have:"; \
