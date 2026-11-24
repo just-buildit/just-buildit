@@ -1144,6 +1144,25 @@ version-check: ## [VERSION=x.y.z] Verify version strings agree
 # holding both the project's version and a dependency's at the same value
 # cannot be split, and runs everything.
 #
+# A release can also move a version written in a form the probe does not
+# print: doppler's package name `libdoppler-dsp0.85_0.85.0_amd64.deb`
+# carries the ABI major.minor, which becomes `0.86` with `0.86.0`
+# (just-buildit.github.io#239). CI_DERIVED_VERSION_TOKENS names such forms,
+# whitespace-separated, each a template of the probed `X.Y.Z` over
+# `{major}`, `{minor}` and `{patch}` (`libdoppler-dsp{major}.{minor}`).
+# Each template is filled from the old version and from the new one, and a
+# changed line is then expected to be BASE's line with the old version AND
+# every filled old token replaced by its new counterpart, in one pass
+# (leftmost match first, the longest at a tie), so a replacement is never
+# itself replaced. Only a token as written is accepted: a bare `0.85` ->
+# `0.86` elsewhere, as in `took 0.85 seconds`, still runs everything, and
+# so does a changed line where a configured token stayed. Empty by default;
+# a repo sets it in its own Makefile, and it reaches the recipe through the
+# environment, so braces and quotes arrive untouched.
+# Keep each template specific: a bare `{minor}` or `{major}.{minor}` is
+# accepted on ANY changed line, source code included, so it widens what a
+# bump may change to every such number in the tree.
+#
 # Each path is read from its `git diff --raw` record -- its old and new
 # mode, and the two blobs compared -- never from a list of names: a name
 # list has no modes, so a bump plus `chmod +x` on a script compared equal
@@ -1162,6 +1181,8 @@ version-check: ## [VERSION=x.y.z] Verify version strings agree
 # reason goes to stderr. BASE defaults to HEAD^ (a PR's merge commit, or a
 # single pushed commit); a workflow passes the pushed range's `before`.
 CI_INERT_RE ?= ^(CHANGELOG\.md|changelog\.d/.+)$$
+CI_DERIVED_VERSION_TOKENS ?=
+export CI_DERIVED_VERSION_TOKENS
 
 ci-changes: ## [BASE=<rev>] src=false when HEAD is only a version bump over BASE
 	@base="$${BASE:-HEAD^}"; \
@@ -1198,13 +1219,39 @@ ci-changes: ## [BASE=<rev>] src=false when HEAD is only a version bump over BASE
 	         && git cat-file blob "$$4" > "$$tmp/got" \
 	         || say true "cannot read $$f at $$base or HEAD"; \
 	     OLD="$$old" NEW="$$new" EOL=$$(tail -c1 "$$tmp/was" | wc -l) awk ' \
-	       function bump(s,   o, i) { \
+	       function lit(s, a, b,   o, i) { \
 	         o = ""; \
-	         while ((i = index(s, ENVIRON["OLD"])) > 0) { \
-	           o = o substr(s, 1, i - 1) ENVIRON["NEW"]; \
-	           s = substr(s, i + length(ENVIRON["OLD"])); \
+	         while ((i = index(s, a)) > 0) { \
+	           o = o substr(s, 1, i - 1) b; s = substr(s, i + length(a)); \
 	         } \
 	         return o s; \
+	       } \
+	       function fill(t, v,   p) { \
+	         split(v, p, "."); \
+	         return lit(lit(lit(t, "{major}", p[1]), "{minor}", p[2]), \
+	                    "{patch}", p[3]); \
+	       } \
+	       BEGIN { \
+	         np = 1; from[1] = ENVIRON["OLD"]; to[1] = ENVIRON["NEW"]; \
+	         nt = split(ENVIRON["CI_DERIVED_VERSION_TOKENS"], tpl); \
+	         for (k = 1; k <= nt; k++) { \
+	           a = fill(tpl[k], from[1]); b = fill(tpl[k], to[1]); \
+	           if (a != "" && a != b) { np++; from[np] = a; to[np] = b; } \
+	         } \
+	       } \
+	       function bump(s,   o, i, k, at, w) { \
+	         o = ""; \
+	         for (;;) { \
+	           at = 0; \
+	           for (k = 1; k <= np; k++) { \
+	             i = index(s, from[k]); \
+	             if (i > 0 && (!at || i < at || (i == at \
+	                 && length(from[k]) > length(from[w])))) { at = i; w = k; } \
+	           } \
+	           if (!at) return o s; \
+	           o = o substr(s, 1, at - 1) to[w]; \
+	           s = substr(s, at + length(from[w])); \
+	         } \
 	       } \
 	       FILENAME == ARGV[1] { got[FNR] = $$0; next } \
 	       { if (FNR > 1) printf "\n"; \
