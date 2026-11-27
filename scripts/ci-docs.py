@@ -84,8 +84,7 @@ def classify(
 
     docs = any(is_docs(p) for _, p in changes)
     code = any(
-        not is_docs(p)
-        or (status in ("D", "T") and not p.startswith(dirs))
+        not is_docs(p) or (status in ("D", "T") and not p.startswith(dirs))
         for status, p in changes
     )
     return docs, code

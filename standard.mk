@@ -2806,6 +2806,17 @@ lint: close-keywords-check
 close-keywords-check: ## A PR's commits, title and body close only the issues it declares
 	@python3 scripts/close-keywords.py --base '$(CLOSE_KEYWORDS_BASE)'
 
+# ── pipefail-readers: no pipe into a reader that stops early ───────────────
+#
+# Under pipefail, `producer | grep -q` (or head, sed 1q, awk exit) fails when
+# the reader exits before the producer has finished writing (SIGPIPE, rc
+# 141), and a `!` in front inverts that; whether it happens is timing. The
+# rules are the vendored script's docstring. It is vendored to every repo so
+# there is one copy of them; a repo runs it over its own pipefail shell, e.g.
+#     python3 scripts/pipefail-readers.py --pipefail-only src/*.sh
+# This file's recipes are exempt: make runs them under /bin/sh, no pipefail.
+VENDORED_FILES += scripts/pipefail-readers.py
+
 # ── self-hosted runners: ci-runner and self-hosted-check ───────────────────
 #
 # A self-hosted runner takes the legs GitHub-hosted capacity cancels or never

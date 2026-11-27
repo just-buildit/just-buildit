@@ -108,15 +108,24 @@ runner group's repository access and the fork-PR approval policy.
 
 Examples
 --------
->>> legs = [{"os": "macos-latest"}, {"os": "macos-latest"},
-...         {"os": "ubuntu-latest"}]
+>>> legs = [
+...     {"os": "macos-latest"},
+...     {"os": "macos-latest"},
+...     {"os": "ubuntu-latest"},
+... ]
 >>> [x["runs_on"] for x in allocate(legs, ("os",), {POOLS[0]: 1})]
 [['self-hosted', 'macOS', 'ARM64'], 'macos-latest', 'ubuntu-latest']
->>> truth(parse_expr("github.event.pull_request.head.repo.full_name"
-...                  " == github.repository"), scenario("pull_request", True))
+>>> truth(
+...     parse_expr(
+...         "github.event.pull_request.head.repo.full_name == github.repository"
+...     ),
+...     scenario("pull_request", True),
+... )
 False
->>> truth(parse_expr("!github.event.pull_request.head.repo.fork"),
-...       scenario("pull_request", deleted=True))
+>>> truth(
+...     parse_expr("!github.event.pull_request.head.repo.fork"),
+...     scenario("pull_request", deleted=True),
+... )
 True
 """
 
@@ -328,7 +337,9 @@ def idle(
     # one excluded every runner and no leg ever went self-hosted.
     for gid in sorted(usable):
         for r in _paged(
-            fetch, f"/orgs/{org}/actions/runner-groups/{gid}/runners", "runners"
+            fetch,
+            f"/orgs/{org}/actions/runner-groups/{gid}/runners",
+            "runners",
         ):
             if r.get("status") != "online" or r.get("busy") is not False:
                 continue
@@ -1470,8 +1481,9 @@ def run_shape_ok(run: str) -> bool:
     GitHub substitutes it into the script before bash reads it, so a
     fork's ``'`` in a title or branch name would end the quote.
 
-    >>> run_shape_ok("printf 'm=${{ github.head_ref }}' | make -s ci-runner"
-    ...              " >> $GITHUB_OUTPUT")
+    >>> run_shape_ok(
+    ...     "printf 'm=${{ github.head_ref }}' | make -s ci-runner >> $GITHUB_OUTPUT"
+    ... )
     False
     """
     if "${{" in run:
