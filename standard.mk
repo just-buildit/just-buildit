@@ -281,7 +281,8 @@ _STD_TREE_STATUS = git -c safe.directory='*' status --porcelain \
                    --ignore-submodules=none
 # $(1): the private target holding the suite. $(2): the public one, to name.
 _std_tree_guard = \
-	b=$$($(_STD_TMP)); a=$$($(_STD_TMP)); trap 'rm -f "$$b" "$$a"' EXIT; \
+	b=$$($(_STD_TMP)) || exit 1; trap 'rm -f "$$b"' EXIT; \
+	a=$$($(_STD_TMP)) || exit 1; trap 'rm -f "$$b" "$$a"' EXIT; \
 	if ! $(_STD_TREE_STATUS) >"$$b" 2>&1; then \
 	    echo "$(2): not a git checkout, so the tree check is OFF this run"; \
 	    $(MAKE) --no-print-directory $(1); exit $$?; \
@@ -419,7 +420,7 @@ gates: ## Reproduce CI's gate set locally -- to debug a CI red, never pre-CI
 gates-check: ## Verify `gates` runs every make target CI invokes
 	@ci="$(GATES_CI_FILE)"; \
 	 if [ ! -f "$$ci" ]; then echo "gates-check: no $$ci — skipped"; exit 0; fi; \
-	 db=$$($(_STD_TMP)); trap 'rm -f "$$db"' EXIT; \
+	 db=$$($(_STD_TMP)) || exit 1; trap 'rm -f "$$db"' EXIT; \
 	 $(MAKE) -rpn --no-print-directory .std-db-goal >"$$db" 2>/dev/null; \
 	 ci_targets=$$($(_STD_CI_TARGETS)); \
 	 if [ -z "$$ci_targets" ]; then \
@@ -486,7 +487,7 @@ gates-home-check: ## Verify every gate in GATES_DEPS runs in some CI job
 	 if [ ! -f "$$ci" ]; then echo "gates-home-check: no $$ci — skipped"; exit 0; fi; \
 	 if [ -z "$(strip $(GATES_DEPS))" ]; then \
 	     echo "gates-home-check: GATES_DEPS is empty — skipped"; exit 0; fi; \
-	 db=$$($(_STD_TMP)); trap 'rm -f "$$db"' EXIT; \
+	 db=$$($(_STD_TMP)) || exit 1; trap 'rm -f "$$db"' EXIT; \
 	 $(MAKE) -rpn --no-print-directory .std-db-goal >"$$db" 2>/dev/null; \
 	 ci_targets=$$($(_STD_CI_TARGETS)); \
 	 if [ -z "$$ci_targets" ]; then \
@@ -795,7 +796,7 @@ docs-serve: ## Build and serve the docs with live reload
 docs-check: ## Pre-push docs gate: strict build + docs invariants
 	@echo "Docs gate: strict build (broken anchors) + docs invariants..."
 	$(DOCS_PREPARE)
-	@tmp=$$($(_STD_TMP)); trap 'rm -f "$$tmp"' EXIT; fail=0; \
+	@tmp=$$($(_STD_TMP)) || exit 1; trap 'rm -f "$$tmp"' EXIT; fail=0; \
 	 run() { echo "=== $$1 ==="; sh -c "$$1" || fail=1; }; \
 	 printf '%s\n' "$$DOCS_CHECK_PRE_CMDS" >"$$tmp"; \
 	 while IFS= read -r c; do [ -n "$$c" ] && run "$$c"; done <"$$tmp"; \
@@ -1174,7 +1175,8 @@ version-check: ## [VERSION=x.y.z] Verify version strings agree
 # .gitmodules otherwise hides a moved pointer from the diff entirely.
 #
 # Fail-safe in every direction: an unreadable BASE, a probe that prints
-# nothing, no version change, an empty diff -- each answers src=true. The
+# nothing, no version change, an empty diff, a temp directory that cannot
+# be made (a gate would refuse there, #251) -- each answers src=true. The
 # worst this can do wrong is run a matrix that was not needed.
 #
 # Prints `src=true|false` and appends it to $GITHUB_OUTPUT when set; the
@@ -1195,7 +1197,10 @@ ci-changes: ## [BASE=<rev>] src=false when HEAD is only a version bump over BASE
 	          | head -n1 | cut -d'|' -f2-); \
 	 [ -n "$$probe" ] || say true "no VERSION_PROBES to read a version with"; \
 	 new=$$(eval "$$probe" 2>/dev/null); \
-	 tmp=$$(mktemp -d); trap 'rm -rf "$$tmp"' EXIT; \
+	 d=$${TMPDIR:-/tmp}; \
+	 tmp=$$($(_STD_TMPDIR_QUIET)) \
+	     || say true "cannot create a temp directory in $$d; running everything"; \
+	 trap 'rm -rf "$$tmp"' EXIT; \
 	 mkdir "$$tmp/base"; \
 	 git archive "$$base" | tar -x -C "$$tmp/base"; \
 	 old=$$(cd "$$tmp/base" && eval "$$probe" 2>/dev/null); \
@@ -2022,7 +2027,27 @@ STD_TARGETS += hook-stage-check tracked-paths-check workflow-timeout-check \
 # A temp file, portably: bare `mktemp` is a GNU extension, and the BSD one
 # macOS ships requires a template. The gates parse make's own database, which
 # is far too big to hold in a shell variable comfortably.
-_STD_TMP = mktemp "$${TMPDIR:-/tmp}/std.XXXXXX"
+#
+# Every temp file or directory in this file comes from one of these two, used
+# as `x=$$($(_STD_TMP)) || exit 1;`. When mktemp fails (TMPDIR names a
+# directory that is missing or read-only) the recipe refuses there, saying
+# so, before it fetches or compares anything. An empty `$$tmp` used to reach
+# `curl -o ""`, and standard-check blamed the network for every vendored file
+# ("cannot fetch <url>"), with mktemp's own error buried between the fetch
+# errors (just-buildit.github.io#251). The one exception is ci-changes, whose
+# contract is fail-safe: it uses _STD_TMPDIR_QUIET, which prints nothing,
+# and answers `|| say true` with one line (run everything) -- never a red
+# changes job, and no ERROR above a job that carried on.
+# tests/test_std_tmp.py holds every site to this form.
+_STD_TMP_REFUSE = { \
+    echo "ERROR: cannot create a temp file in $${TMPDIR:-/tmp} (TMPDIR)." >&2; \
+    echo "  This is the local temp directory, not what the gate checks:" >&2; \
+    echo "  nothing was fetched or compared. Point TMPDIR at a writable" >&2; \
+    echo "  directory and re-run." >&2; \
+    exit 1; }
+_STD_TMP = mktemp "$${TMPDIR:-/tmp}/std.XXXXXX" || $(_STD_TMP_REFUSE)
+_STD_TMPDIR = mktemp -d "$${TMPDIR:-/tmp}/std.XXXXXX" || $(_STD_TMP_REFUSE)
+_STD_TMPDIR_QUIET = mktemp -d "$${TMPDIR:-/tmp}/std.XXXXXX" 2>/dev/null
 
 # The rule for the target named in the calling recipe's `t`, read from the
 # files named after the macro, with the name matched as a LITERAL string:
@@ -2213,7 +2238,7 @@ standard-update: ## Re-fetch every vendored file from canonical
 	std_changed=0; \
 	for f in $(STANDARD_FILE) $(VENDORED_FILES); do \
 	    $(_std_vendor_src); \
-	    tmp=$$(mktemp); \
+	    tmp=$$($(_STD_TMP)) || exit 1; \
 	    if ! curl -fsSL "$$u" -o "$$tmp" 2>/dev/null; then \
 	        rm -f "$$tmp"; \
 	        echo "standard-update: cannot fetch $$u — refusing to leave a"; \
@@ -2249,7 +2274,7 @@ standard-check: ## Verify every vendored file matches canonical
 	        echo "    curl -fsSL $$u -o $$f"; \
 	        fail=1; continue; \
 	    fi; \
-	    tmp=$$(mktemp); \
+	    tmp=$$($(_STD_TMP)) || exit 1; \
 	    if ! curl -fsSL "$$u" -o "$$tmp" 2>/dev/null; then \
 	        rm -f "$$tmp"; \
 	        echo "ERROR: cannot fetch $$u"; \
@@ -2306,7 +2331,7 @@ standard-check: ## Verify every vendored file matches canonical
 # in almost every repo for nothing.
 help-check: ## Verify help documents every target, and every target is listed
 	@rc=0; \
-	 db=$$($(_STD_TMP)); trap 'rm -f "$$db"' EXIT; \
+	 db=$$($(_STD_TMP)) || exit 1; trap 'rm -f "$$db"' EXIT; \
 	 $(MAKE) -rpn --no-print-directory .std-db-goal >"$$db" 2>/dev/null; \
 	 for t in $(ALL_TARGETS); do \
 	     $(_STD_DESC); \
@@ -2383,7 +2408,9 @@ help-check: ## Verify help documents every target, and every target is listed
 # `sort -u` deduping names or paths can silently drop entries, so the gates
 # that dedup CI targets, tidy file lists and hook stages pin it too.
 ghost-check: ## Verify every .PHONY target has a recipe
-	@db=$$($(_STD_TMP)); phony=$$($(_STD_TMP)); norecipe=$$($(_STD_TMP)); \
+	@db=$$($(_STD_TMP)) || exit 1; trap 'rm -f "$$db"' EXIT; \
+	 phony=$$($(_STD_TMP)) || exit 1; trap 'rm -f "$$db" "$$phony"' EXIT; \
+	 norecipe=$$($(_STD_TMP)) || exit 1; \
 	 trap 'rm -f "$$db" "$$phony" "$$norecipe"' EXIT; \
 	 $(MAKE) -rpn --no-print-directory .std-db-goal >"$$db" 2>/dev/null; \
 	 sed -n 's/^\.PHONY:[ ]*//p' "$$db" | tr ' ' '\n' | sed '/^$$/d' \
@@ -2437,7 +2464,7 @@ hook-dispatch-check: ## Verify every pre-commit hook dispatches to a real `make`
 	     echo "hook-dispatch-check: no $$cfg — nothing to check"; \
 	     exit 0; \
 	 fi; \
-	 db=$$($(_STD_TMP)); trap 'rm -f "$$db"' EXIT; \
+	 db=$$($(_STD_TMP)) || exit 1; trap 'rm -f "$$db"' EXIT; \
 	 $(MAKE) -rpn --no-print-directory .std-db-goal >"$$db" 2>/dev/null; \
 	 n=0; missing=""; \
 	 for t in $$(sed -n "s/^[[:space:]]*entry:[[:space:]]*[\"']\{0,1\}make[[:space:]]\{1,\}\(-s[[:space:]]\{1,\}\)\{0,1\}\([a-zA-Z0-9_.-]\{1,\}\).*/\2/p" "$$cfg"); do \
@@ -2805,6 +2832,17 @@ lint: close-keywords-check
 
 close-keywords-check: ## A PR's commits, title and body close only the issues it declares
 	@python3 scripts/close-keywords.py --base '$(CLOSE_KEYWORDS_BASE)'
+
+# ── pipefail-readers: no pipe into a reader that stops early ───────────────
+#
+# Under pipefail, `producer | grep -q` (or head, sed 1q, awk exit) fails when
+# the reader exits before the producer has finished writing (SIGPIPE, rc
+# 141), and a `!` in front inverts that; whether it happens is timing. The
+# rules are the vendored script's docstring. It is vendored to every repo so
+# there is one copy of them; a repo runs it over its own pipefail shell, e.g.
+#     python3 scripts/pipefail-readers.py --pipefail-only src/*.sh
+# This file's recipes are exempt: make runs them under /bin/sh, no pipefail.
+VENDORED_FILES += scripts/pipefail-readers.py
 
 # ── self-hosted runners: ci-runner and self-hosted-check ───────────────────
 #

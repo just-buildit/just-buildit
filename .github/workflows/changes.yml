@@ -183,7 +183,7 @@ jobs:
             fi
             verdict=$(printf '%s\n' "$runs" | jq -r --arg n "$CI_CHECK" \
               '.check_runs[] | select(.name == $n)
-               | "\(.status) \(.conclusion)"' | head -n1) || verdict=""
+               | "\(.status) \(.conclusion)"' | sed -n 1p) || verdict=""
             if [[ "$verdict" != "completed success" ]]; then
               emit "$base's '$CI_CHECK' is '${verdict:-absent}', not a pass; running all"
             fi

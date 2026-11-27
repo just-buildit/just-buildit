@@ -501,9 +501,7 @@ def read_train(t: int, base: str) -> dict[str, Any]:
         )
     tr["heads"] = constituents(tr["body"])
     if not tr["heads"]:
-        raise RefusedError(
-            f"#{t} is not a train: its body has no train table"
-        )
+        raise RefusedError(f"#{t} is not a train: its body has no train table")
     return tr
 
 
@@ -515,10 +513,12 @@ def constituents(body: str) -> dict[int, str | None]:
     and each one's head is the ``source`` of its last row (None for a
     train cut before that column existed).
 
-    >>> body = ("| commit | from | source |\\n|---|---|---|\\n"
-    ...         "| `a` | #3 | `" + "1" * 40 + "` |\\n"
-    ...         "| `b` | #3 | `" + "2" * 40 + "` |\\n"
-    ...         "| `c` | #5 |\\n")
+    >>> body = (
+    ...     "| commit | from | source |\\n|---|---|---|\\n"
+    ...     "| `a` | #3 | `" + "1" * 40 + "` |\\n"
+    ...     "| `b` | #3 | `" + "2" * 40 + "` |\\n"
+    ...     "| `c` | #5 |\\n"
+    ... )
     >>> heads = constituents(body)
     >>> list(heads), heads[3][:4], heads[5]
     ([3, 5], '2222', None)
@@ -533,8 +533,10 @@ def constituents(body: str) -> dict[int, str | None]:
     A train's table beside other tables reads only the train's rows:
 
     >>> issues = "| item | issue |\\n|---|---|\\n| `x` | #7 |\\n"
-    >>> train_t = ("| commit | from | source |\\n|---|---|---|\\n"
-    ...            "| `a` | #3 | `" + "1" * 40 + "` |\\n")
+    >>> train_t = (
+    ...     "| commit | from | source |\\n|---|---|---|\\n"
+    ...     "| `a` | #3 | `" + "1" * 40 + "` |\\n"
+    ... )
     >>> list(constituents(issues + "\\n" + train_t + "\\n" + issues))
     [3]
     """
@@ -599,14 +601,11 @@ def plan_reopen(
 
 def moved_line(n: int, old: str, new: str) -> str:
     return (
-        f"#{n} moved: {old[:9]} ({subject(old)}) -> "
-        f"{new[:9]} ({subject(new)})"
+        f"#{n} moved: {old[:9]} ({subject(old)}) -> {new[:9]} ({subject(new)})"
     )
 
 
-def moved(
-    pr: dict[str, Any], old: dict[str, Any], remote: str
-) -> str | None:
+def moved(pr: dict[str, Any], old: dict[str, Any], remote: str) -> str | None:
     """Why constituent ``pr`` of train ``old`` counts as moved, or None.
 
     A closed one is planned for reopening (``plan_reopen``). An open one
@@ -691,9 +690,7 @@ def reopen(pr: dict[str, Any], remote: str, rerun: str) -> None:
                 f"#{n}: gh pr reopen exited {first.returncode}: "
                 f"{(first.stderr or first.stdout).strip()}"
             )
-        print(
-            f"train: #{n} refused to reopen; restoring {old[:9]} around it"
-        )
+        print(f"train: #{n} refused to reopen; restoring {old[:9]} around it")
         push_lease(remote, br, new, old)
         try:
             gh("pr", "reopen", str(n))
@@ -990,9 +987,9 @@ def compose(args: argparse.Namespace) -> int:
         return rc
     finally:
         for n in args.prs:
-            for r in ("pr-{}", "closed-{}") + (() if not ok else (
-                "closed-{}-new",
-            )):
+            for r in ("pr-{}", "closed-{}") + (
+                () if not ok else ("closed-{}-new",)
+            ):
                 ref = "refs/train/" + r.format(n)
                 git("update-ref", "-d", ref, check=False)
 
@@ -1007,9 +1004,7 @@ def compose_train(args: argparse.Namespace) -> int:
     if args.recut:
         old = read_train(args.recut, args.base)
         args.prs = list(old["heads"])
-    prs = [
-        check_pr(n, args.base, repo, closed_ok=bool(old)) for n in args.prs
-    ]
+    prs = [check_pr(n, args.base, repo, closed_ok=bool(old)) for n in args.prs]
     if old is not None:
         moves = {}
         for p in prs:
@@ -1143,9 +1138,7 @@ def compose_train(args: argparse.Namespace) -> int:
         title = args.title or (
             "train: " + ", ".join(f"#{p['number']}" for p in prs)
         )
-        body = body_for(
-            prs, picks, base_sha, args.base, args.gate, args.recut
-        )
+        body = body_for(prs, picks, base_sha, args.base, args.gate, args.recut)
         close_keywords(title, body, head, base_sha, repo, len(picks))
 
         if not args.push:
@@ -1253,8 +1246,7 @@ def retire_one(n: int, was: str | None, remote: str) -> tuple[str, str]:
     tip = line.split()[0]
     if tip != was:
         return "kept", (
-            f"#{n}: {br} moved after the train took it: "
-            f"{was[:9]} -> {tip[:9]}"
+            f"#{n}: {br} moved after the train took it: {was[:9]} -> {tip[:9]}"
         )
     # The lease makes the compare and the delete one step on the remote:
     # a push landing after the ls-remote above keeps the branch.

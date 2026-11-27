@@ -65,7 +65,7 @@ published() {
   gh run view "$RUN" -R "$REPO" --json jobs --jq \
     "[.jobs[] | select(.name|test(\"$RW_PUBLISH_JOB\";\"i\"))
               | select(.conclusion==\"success\")] | length" \
-    2>/dev/null | grep -q '^[1-9]'
+    2>/dev/null | grep '^[1-9]' >/dev/null
 }
 
 # How many jobs the publish matcher sees at all, whatever their conclusion.
