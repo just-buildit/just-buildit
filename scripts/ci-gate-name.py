@@ -90,9 +90,11 @@ no ``name:`` is named its id. Names are compared trimmed and case aside.
 
 Examples
 --------
->>> full = ("${{ s == 'full' && 'CI passed' || "
-...         "s == 'minimal' && "
-...         "'CI passed (push, minimal set)' || 'CI passed (skipped)' }}")
+>>> full = (
+...     "${{ s == 'full' && 'CI passed' || "
+...     "s == 'minimal' && "
+...     "'CI passed (push, minimal set)' || 'CI passed (skipped)' }}"
+... )
 >>> refusal("CI passed", full, "always()") is None
 True
 >>> off = full.replace(" (push, minimal set)", "")
@@ -320,9 +322,7 @@ def branches(expr: str) -> list[tuple[str | None, str, str]]:
         last = k == len(terms)
         if last and len(ops) == 1:
             if len(ops[0]) != 1 or ops[0][0][0] != "str":
-                raise Refused(
-                    f"the fallback is not a string literal: {src}"
-                )
+                raise Refused(f"the fallback is not a string literal: {src}")
             out.append((None, ops[0][0][1], src))
             continue
         if last:
@@ -658,8 +658,10 @@ def _map(lines: list[Line], i: int, col: int) -> tuple[object, int]:
         if rest:
             v: object = _scalar(rest)
             i += 1
-        elif i + 1 < len(lines) and lines[i + 1][0] == col and _is_item(
-            lines[i + 1][1]
+        elif (
+            i + 1 < len(lines)
+            and lines[i + 1][0] == col
+            and _is_item(lines[i + 1][1])
         ):
             v, i = _seq(lines, i + 1, col)
         else:
@@ -694,18 +696,25 @@ def matrix_of(body: list[str]) -> dict[str, object]:
     Anything else -- an anchor, a block scalar, an expression where a
     list belongs -- is refused rather than guessed at.
 
-    >>> body = ["    strategy:", "      matrix:", "        san:",
-    ...         '          - { target: a, label: "ASan" }',
-    ...         "          - target: u", "            label: UBSan",
-    ...         "        include:", "          - os: x  # a comment"]
+    >>> body = [
+    ...     "    strategy:",
+    ...     "      matrix:",
+    ...     "        san:",
+    ...     '          - { target: a, label: "ASan" }',
+    ...     "          - target: u",
+    ...     "            label: UBSan",
+    ...     "        include:",
+    ...     "          - os: x  # a comment",
+    ... ]
     >>> matrix_of(body)  # doctest: +NORMALIZE_WHITESPACE
     {'san': [{'target': 'a', 'label': 'ASan'},
              {'target': 'u', 'label': 'UBSan'}], 'include': [{'os': 'x'}]}
     >>> matrix_of(["    strategy:", "      matrix: { w: [passed] }"])
     {'w': ['passed']}
     >>> try:
-    ...     matrix_of(["    strategy:",
-    ...                "      matrix: ${{ fromJSON(needs.a.outputs.m) }}"])
+    ...     matrix_of(
+    ...         ["    strategy:", "      matrix: ${{ fromJSON(needs.a.outputs.m) }}"]
+    ...     )
     ... except Refused as e:
     ...     print(e)
     strategy.matrix is not literal: ${{ fromJSON(needs.a.outputs.m) }}
@@ -778,8 +787,7 @@ def values(matrix: dict[str, object], ref: str) -> set[str]:
     ``include:`` sets may be absent from a combination, which renders as
     the empty string.
 
-    >>> m = {"san": [{"label": "ASan"}, {"label": "TSan"}],
-    ...      "include": [{"os": "x"}]}
+    >>> m = {"san": [{"label": "ASan"}, {"label": "TSan"}], "include": [{"os": "x"}]}
     >>> sorted(values(m, "matrix.san.label"))
     ['ASan', 'TSan']
     >>> sorted(values(m, "matrix.os"))
