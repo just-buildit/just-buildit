@@ -112,7 +112,7 @@ RUFF       = $(DEV_RUN) ruff
 MDFORMAT   = $(DEV_RUN) mdformat
 PRE_COMMIT = $(DEV_RUN) pre-commit
 
-LINT_TOOLS = ruff ruff-format mdformat
+LINT_TOOLS = ruff ruff-format mdformat pipefail-readers
 # ruff before ruff-format when FIXING, so the formatter has the last word.
 FORMAT_TOOLS = ruff-format ruff mdformat
 
@@ -126,6 +126,17 @@ MD_EXCLUDE_RE = ^(src/just_buildit/_vendor/)
 LINT_ruff        = $(RUFF) check --fix --unsafe-fixes $(RUFF_EXCLUDE) \
                        $(RUFF_PATHS)
 LINT_ruff-format = $(RUFF) format $(RUFF_EXCLUDE) $(RUFF_PATHS)
+
+# No pipeline under pipefail ends in a reader that stops early (grep -q,
+# head, sed 1q, awk exit): the producer takes SIGPIPE and the pipeline
+# fails, or under `!` the answer flips, by timing. The rules are canonical's
+# vendored scripts/pipefail-readers.py, read over every tracked shell script
+# that sets pipefail and every workflow. Vendored files are left out (`:!:`
+# pathspecs): canonical holds them to the same script, and a fix lands here
+# by re-vendoring. Not in FORMAT_TOOLS: it reports, it does not rewrite.
+LINT_pipefail-readers = $(UV) run --no-sync python \
+    scripts/pipefail-readers.py --pipefail-only $$(git ls-files \
+    '*.sh' '*.yml' '*.yaml' $(addprefix :!:,$(VENDORED_FILES)))
 
 define LINT_mdformat
 @git ls-files '*.md' \

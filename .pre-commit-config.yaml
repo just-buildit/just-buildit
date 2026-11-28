@@ -50,3 +50,11 @@ repos:
         language: system
         types: [markdown]
         pass_filenames: false
+      # Whole-tree on every run: a pipe added to any script or workflow is
+      # read whatever the commit touched.
+      - id: pipefail-readers
+        name: no pipefail pipe ends in an early reader (grep -q, head)
+        entry: make -s lint-pipefail-readers
+        language: system
+        pass_filenames: false
+        always_run: true
